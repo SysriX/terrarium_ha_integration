@@ -1,0 +1,57 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "Terrarium ist bereits eingerichtet.",
+      "single_instance_allowed": "Terrarium ist bereits eingerichtet."
+    },
+    "step": {
+      "user": {
+        "title": "Terrarium",
+        "description": "Anlagen, Terrarien, Sensoren und Grenzwerte werden im Terrarien-Panel in der Seitenleiste (oder in der Terrarien-Karte) verwaltet.",
+        "data": {
+          "panel_show": "Panel in der Seitenleiste anzeigen",
+          "panel_title": "Titel in der Seitenleiste",
+          "panel_icon": "Symbol in der Seitenleiste",
+          "panel_admin": "Panel nur für Administratoren"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Terrarium",
+        "description": "Anlagen, Terrarien, Sensoren und Grenzwerte werden im Terrarien-Panel verwaltet.",
+        "data": {
+          "panel_show": "Panel in der Seitenleiste anzeigen",
+          "panel_title": "Titel in der Seitenleiste",
+          "panel_icon": "Symbol in der Seitenleiste",
+          "panel_admin": "Panel nur für Administratoren"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "temperature": {"name": "Temperatur"},
+      "humidity": {"name": "Luftfeuchtigkeit"},
+      "status": {
+        "name": "Status",
+        "state": {
+          "ok": "OK",
+          "pending": "Abweichung",
+          "alarm": "Alarm",
+          "offline": "Keine Daten",
+          "not_configured": "Nicht eingerichtet"
+        }
+      },
+      "problems": {"name": "Probleme"}
+    },
+    "binary_sensor": {
+      "problem": {"name": "Problem"}
+    },
+    "switch": {
+      "cfg_notify": {"name": "Benachrichtigungen"}
+    }
+  }
+}

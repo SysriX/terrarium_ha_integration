@@ -1,0 +1,117 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Terrarium card test</title>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css">
+<style>
+  :root { --primary-background-color:#111315; --card-background-color:#1c1e21; --secondary-background-color:#25282c; --primary-text-color:#e6e6e6;
+    --secondary-text-color:#9aa0a6; --divider-color:#33373c; --primary-color:#03a9f4; --app-header-background-color:#1c1e21; }
+  body { margin:0; background: var(--primary-background-color); font-family: Roboto, "Segoe UI", sans-serif; }
+  #host { max-width: 1400px; margin: 0 auto; }
+</style>
+</head>
+<body>
+<div id="host"></div>
+<script>
+// minimal ha-icon / ha-menu-button / ha-card stand-ins for the test page
+customElements.define("ha-icon", class extends HTMLElement {
+  static get observedAttributes() { return ["icon"]; }
+  connectedCallback() { this.r(); } attributeChangedCallback() { this.r(); }
+  r() { if (!this.shadowRoot) this.attachShadow({ mode: "open" });
+    const n = (this.getAttribute("icon") || "").replace("mdi:", "");
+    this.shadowRoot.innerHTML = `<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@mdi/font@7.4.47/css/materialdesignicons.min.css"><style>:host{display:inline-flex;vertical-align:middle}i{font-size:var(--mdc-icon-size,20px);line-height:1}</style><i class="mdi mdi-${n}"></i>`; }
+});
+customElements.define("ha-menu-button", class extends HTMLElement { connectedCallback() { this.innerHTML = `<ha-icon icon="mdi:menu" style="padding:8px"></ha-icon>`; } });
+customElements.define("ha-card", class extends HTMLElement { connectedCallback() { this.style.display = "block"; this.style.background = "var(--card-background-color)"; this.style.borderRadius = "12px"; } });
+</script>
+<script src="../custom_components/terrarium/frontend/terrarium-card.js"></script>
+<script>
+const P = new URLSearchParams(location.search);
+const states = {};
+const st = (id, state, attrs) => { states[id] = { entity_id: id, state: String(state), attributes: attrs }; };
+st("sensor.rack_top_temperature", 27.4, { friendly_name: "Rack top temperature", unit_of_measurement: "°C", device_class: "temperature" });
+st("sensor.rack_top_humidity", 52, { friendly_name: "Rack top humidity", unit_of_measurement: "%", device_class: "humidity" });
+st("sensor.gecko_warm_temperature", 30.8, { friendly_name: "Gecko warm side", unit_of_measurement: "°C", device_class: "temperature" });
+st("sensor.gecko_cold_temperature", 25.2, { friendly_name: "Gecko cold side", unit_of_measurement: "°C", device_class: "temperature" });
+st("sensor.gecko_humidity", 41, { friendly_name: "Gecko humidity", unit_of_measurement: "%", device_class: "humidity" });
+st("sensor.crested_temperature", 24.1, { friendly_name: "Crested gecko temperature", unit_of_measurement: "°C", device_class: "temperature" });
+st("sensor.crested_humidity", 63, { friendly_name: "Crested gecko humidity", unit_of_measurement: "%", device_class: "humidity" });
+st("sensor.frogs_temperature", 23.6, { friendly_name: "Dart frogs temperature", unit_of_measurement: "°C", device_class: "temperature" });
+st("sensor.frogs_humidity", 78, { friendly_name: "Dart frogs humidity", unit_of_measurement: "%", device_class: "humidity" });
+st("sensor.dragon_temperature", 38.9, { friendly_name: "Bearded dragon temperature", unit_of_measurement: "°C", device_class: "temperature" });
+st("sensor.dragon_humidity", 31, { friendly_name: "Bearded dragon humidity", unit_of_measurement: "%", device_class: "humidity" });
+st("light.gecko_led", "on", { friendly_name: "Gecko LED" });
+st("switch.gecko_heat_mat", "on", { friendly_name: "Heat mat" });
+st("light.frogs_led", "on", { friendly_name: "Frogs LED" });
+st("switch.frogs_rain", "on", { friendly_name: "Rain system" });
+st("fan.frogs_fan", "off", { friendly_name: "Frogs fan" });
+st("light.dragon_uv", "on", { friendly_name: "UV lamp" });
+st("notify.mobile_app_phone", "unknown", { friendly_name: "Phone" });
+
+const clim = (ts, hs, tmin, tmax, hmin, hmax) => ({ temp_sensors: ts, hum_sensors: hs, temp_min: tmin, temp_max: tmax, hum_min: hmin, hum_max: hmax,
+  night: { enabled: true, start: "21:00", end: "07:00", temp_min: tmin - 4, temp_max: null, hum_min: null, hum_max: null }, delay: 10, temp_hyst: 0.5, hum_hyst: 3 });
+const notify = { enabled: true, targets: ["notify.mobile_app_phone"], clear: true, offline: true, repeat: 0, persistent: false };
+const mk = (id, nr, name, animal, x, y, w, h, c, look, devices, live) => ({ id, nr, name, animal, x, y, width: w, height: h, depth: 50, climate: c, notify, devices, look,
+  light: {}, ventilation: {}, rain: {}, label: "", live, entities: { temperature: `sensor.terrarium_${id}_temperature`, humidity: `sensor.terrarium_${id}_humidity` } });
+const live = (t, h, status, problems = [], pending = [], devices = [], tg = {}) => ({ temperature: t, humidity: h, status, problems, pending, period: "day",
+  since: Object.fromEntries([...problems, ...pending].map((p) => [p, new Date(Date.now() - 42 * 60000).toISOString()])), targets: tg,
+  temp_sensors: [], hum_sensors: [], devices });
+const data = { enclosures: [
+  { id: "e1", nr: 1, name: "Living room rack", width: 120, height: 180, depth: 50, color: "wood", compartments: [
+    mk("c1", 1, "Corn snake", "Pantherophis guttatus", 0, 0, 120, 58, clim(["sensor.rack_top_temperature"], ["sensor.rack_top_humidity"], 24, 30, 40, 65),
+      { substrate: "bark", decor: "branches", background: "cork" }, [],
+      live(27.4, 52, "ok", [], [], [], { temp_min: 24, temp_max: 30, hum_min: 40, hum_max: 65 })),
+    mk("c2", 2, "Leopard gecko", "Eublepharis macularius", 0, 61, 58.5, 56, clim(["sensor.gecko_warm_temperature", "sensor.gecko_cold_temperature"], ["sensor.gecko_humidity"], 25, 32, 30, 50),
+      { substrate: "sand", decor: "stones", background: "rock" },
+      [{ entity_id: "light.gecko_led", kind: "light", name: "" }, { entity_id: "switch.gecko_heat_mat", kind: "heat", name: "" }],
+      live(28.0, 41, "ok", [], [], [{ entity_id: "light.gecko_led", kind: "light", state: "on" }, { entity_id: "switch.gecko_heat_mat", kind: "heat", state: "on" }], { temp_min: 25, temp_max: 32, hum_min: 30, hum_max: 50 })),
+    mk("c3", 3, "Crested gecko", "Correlophus ciliatus", 61.5, 61, 58.5, 56, clim(["sensor.crested_temperature"], ["sensor.crested_humidity"], 22, 27, 65, 85),
+      { substrate: "soil", decor: "mixed", background: "cork" }, [],
+      live(24.1, 63, "pending", [], ["hum_low"], [], { temp_min: 22, temp_max: 27, hum_min: 65, hum_max: 85 })),
+    mk("c4", 4, "Dart frogs", "Dendrobates tinctorius", 0, 120, 120, 60, clim(["sensor.frogs_temperature"], ["sensor.frogs_humidity"], 21, 27, 70, 100),
+      { substrate: "water", decor: "plants", background: "jungle" },
+      [{ entity_id: "light.frogs_led", kind: "light", name: "" }, { entity_id: "switch.frogs_rain", kind: "rain", name: "" }, { entity_id: "fan.frogs_fan", kind: "ventilation", name: "" }],
+      live(23.6, 78, "ok", [], [], [{ entity_id: "light.frogs_led", kind: "light", state: "on" }, { entity_id: "switch.frogs_rain", kind: "rain", state: "on" }], { temp_min: 21, temp_max: 27, hum_min: 70, hum_max: 100 })),
+  ] },
+  { id: "e2", nr: 2, name: "Office", width: 100, height: 60, depth: 50, color: "black", compartments: [
+    mk("c5", 1, "Bearded dragon", "Pogona vitticeps", 0, 0, 100, 60, clim(["sensor.dragon_temperature"], ["sensor.dragon_humidity"], 26, 36, 25, 45),
+      { substrate: "sand", decor: "branches", background: "rock" }, [{ entity_id: "light.dragon_uv", kind: "uv", name: "" }],
+      live(38.9, 31, "alarm", ["temp_high"], [], [{ entity_id: "light.dragon_uv", kind: "uv", state: "on" }], { temp_min: 26, temp_max: 36, hum_min: 25, hum_max: 45 })),
+  ] },
+] };
+for (const e of data.enclosures) for (const c of e.compartments) c.label = `${e.nr}.${c.nr}`;
+data.enclosures[0].compartments[1].live.temp_sensors = [{ entity_id: "sensor.gecko_warm_temperature", name: "Gecko warm side", value: 30.8 }, { entity_id: "sensor.gecko_cold_temperature", name: "Gecko cold side", value: 25.2 }];
+data.enclosures[0].compartments[1].live.hum_sensors = [{ entity_id: "sensor.gecko_humidity", name: "Gecko humidity", value: 41 }];
+
+let subCb = null;
+const hist = (base, amp, noise) => { const out = []; const now = Date.now() / 1000; for (let i = 0; i <= 288; i++) { const t = now - 86400 + i * 300; const hr = new Date(t * 1000).getHours() + new Date(t * 1000).getMinutes() / 60; out.push({ s: (base + amp * Math.sin((hr - 9) / 24 * 2 * Math.PI) + (Math.random() - 0.5) * noise).toFixed(2), lu: t }); } return out; };
+const hass = {
+  language: P.get("lang") || "en", locale: { language: P.get("lang") || "en" }, user: { is_admin: true }, states,
+  connection: { subscribeMessage: (cb) => { subCb = cb; setTimeout(() => cb(data), 10); return Promise.resolve(() => {}); } },
+  callService: (d, s, dt) => { const e = states[dt.entity_id]; if (e) e.state = e.state === "on" ? "off" : "on"; for (const en of data.enclosures) for (const c of en.compartments) for (const dv of c.live.devices) if (dv.entity_id === dt.entity_id) dv.state = e.state; subCb && subCb(data); },
+  callWS: async (m) => {
+    if (m.type === "terrarium/notify_targets") return { targets: [{ id: "notify.mobile_app_phone", name: "Phone", type: "service" }] };
+    if (m.type === "history/history_during_period") { const out = {}; for (const id of m.entity_ids) out[id] = id.endsWith("temperature") ? hist(27, 3, 0.4) : hist(55, 10, 2); return out; }
+    if (m.type === "terrarium/save_enclosure") { console.log("save_enclosure", m.enclosure); return { id: "x", reload: true }; }
+    if (m.type === "terrarium/save_compartment") { console.log("save_compartment", m); return null; }
+    if (m.type === "terrarium/test_notify") return { failed: [] };
+    return null;
+  },
+};
+const mode = P.get("mode") || "panel";
+const el = document.createElement(mode === "card" ? "terrarium-card" : "terrarium-panel");
+if (mode === "card") el.setConfig({});
+el.panel = { title: "Terrariums" };
+el.hass = hass;
+document.getElementById("host").appendChild(el);
+const view = P.get("view");
+setTimeout(() => {
+  if (view === "details") { el._view = { name: "details", comp: P.get("comp") || "c4" }; el._render(); }
+  if (view === "settings") el._openCompSettings(P.get("comp") || "c2");
+  if (view === "editor") { el._openEncEditor("e1"); el._view.sel = "c3"; el._render(); }
+}, 60);
+</script>
+</body>
+</html>

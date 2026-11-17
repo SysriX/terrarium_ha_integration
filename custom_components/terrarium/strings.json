@@ -1,0 +1,57 @@
+{
+  "config": {
+    "abort": {
+      "already_configured": "Terrarium is already set up.",
+      "single_instance_allowed": "Terrarium is already set up."
+    },
+    "step": {
+      "user": {
+        "title": "Terrarium",
+        "description": "Enclosures, compartments, sensors and limits are managed in the Terrarium panel in the sidebar (or in the terrarium card).",
+        "data": {
+          "panel_show": "Show panel in the sidebar",
+          "panel_title": "Sidebar title",
+          "panel_icon": "Sidebar icon",
+          "panel_admin": "Panel only for administrators"
+        }
+      }
+    }
+  },
+  "options": {
+    "step": {
+      "init": {
+        "title": "Terrarium",
+        "description": "Enclosures, compartments, sensors and limits are managed in the Terrarium panel.",
+        "data": {
+          "panel_show": "Show panel in the sidebar",
+          "panel_title": "Sidebar title",
+          "panel_icon": "Sidebar icon",
+          "panel_admin": "Panel only for administrators"
+        }
+      }
+    }
+  },
+  "entity": {
+    "sensor": {
+      "temperature": {"name": "Temperature"},
+      "humidity": {"name": "Humidity"},
+      "status": {
+        "name": "Status",
+        "state": {
+          "ok": "OK",
+          "pending": "Deviation",
+          "alarm": "Alarm",
+          "offline": "No data",
+          "not_configured": "Not configured"
+        }
+      },
+      "problems": {"name": "Problems"}
+    },
+    "binary_sensor": {
+      "problem": {"name": "Problem"}
+    },
+    "switch": {
+      "cfg_notify": {"name": "Notifications"}
+    }
+  }
+}
