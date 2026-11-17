@@ -81,7 +81,7 @@ const data = { enclosures: [
       live(38.9, 31, "alarm", ["temp_high"], [], [{ entity_id: "light.dragon_uv", kind: "uv", state: "on" }], { temp_min: 26, temp_max: 36, hum_min: 25, hum_max: 45 })),
   ] },
 ] };
-for (const e of data.enclosures) for (const c of e.compartments) c.label = `${e.nr}.${c.nr}`;
+for (const e of data.enclosures) for (const c of e.compartments) { c.label = `${e.nr}.${c.nr}`; c.live.devices = c.devices.map((d) => ({ ...d, state: states[d.entity_id]?.state ?? null })); }
 data.enclosures[0].compartments[1].live.temp_sensors = [{ entity_id: "sensor.gecko_warm_temperature", name: "Gecko warm side", value: 30.8 }, { entity_id: "sensor.gecko_cold_temperature", name: "Gecko cold side", value: 25.2 }];
 data.enclosures[0].compartments[1].live.hum_sensors = [{ entity_id: "sensor.gecko_humidity", name: "Gecko humidity", value: 41 }];
 

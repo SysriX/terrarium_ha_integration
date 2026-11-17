@@ -1,6 +1,6 @@
 /* Terrarium card + panel for Home Assistant – https://github.com/SysriX/terrarium_ha_integration */
 (() => {
-const VERSION = "1.0.0";
+const VERSION = "1.1.0";
 if (customElements.get("terrarium-card")) return;
 
 /* ------------------------------------------------------------------ texts */
@@ -44,6 +44,7 @@ const TEXTS = {
     kind: "Art", k_light: "Licht", k_heat: "Wärme", k_uv: "UV", k_ventilation: "Lüftung", k_rain: "Beregnung", k_fogger: "Nebler", k_pump: "Pumpe", k_other: "Sonstiges",
     planned: "Geplant", planned_hint: "Diese Automationen folgen in einer späteren Version.",
     m_light: "Lichtsteuerung (Zeiten, Sonnenauf-/-untergang)", m_ventilation: "Lüftungssteuerung", m_rain: "Beregnung / Regensimulation",
+    model_show: "Modell anzeigen", model_hide: "Nur Liste",
     on: "An", off: "Aus", unavailable: "nicht verfügbar", required_num: "Bitte eine Zahl eingeben.",
   },
   en: {
@@ -83,6 +84,7 @@ const TEXTS = {
     kind: "Kind", k_light: "Light", k_heat: "Heat", k_uv: "UV", k_ventilation: "Ventilation", k_rain: "Rain", k_fogger: "Fogger", k_pump: "Pump", k_other: "Other",
     planned: "Planned", planned_hint: "These automations follow in a later version.",
     m_light: "Light control (times, sunrise/sunset)", m_ventilation: "Ventilation control", m_rain: "Rain simulation",
+    model_show: "Show model", model_hide: "List only",
     on: "On", off: "Off", unavailable: "unavailable", required_num: "Please enter a number.",
   },
 };
@@ -336,9 +338,9 @@ function chartSVG(points, lo, hi, unit, color, startMs, endMs) {
 
 /* ------------------------------------------------------------------ styles */
 const STYLE = `
-:host { display:block; --tc-gap:12px; --tc-muted: var(--secondary-text-color, #9aa0a6); }
+:host { display:block; --tc-gap:12px; --tc-muted: var(--secondary-text-color, #9aa0a6); -webkit-tap-highlight-color: transparent; }
 * { box-sizing: border-box; }
-.wrap { padding: 12px; color: var(--primary-text-color, #e1e1e1); font-family: var(--paper-font-body1_-_font-family, inherit); }
+.wrap { container-type: inline-size; padding: 12px; color: var(--primary-text-color, #e1e1e1); font-family: var(--paper-font-body1_-_font-family, inherit); }
 .panel .wrap { padding: 16px; max-width: 1600px; margin: 0 auto; }
 h2 { font-size: 1.25rem; margin: 0; font-weight: 600; }
 h3 { font-size: 1rem; margin: 0 0 8px; font-weight: 600; }
@@ -346,6 +348,7 @@ h3 { font-size: 1rem; margin: 0 0 8px; font-weight: 600; }
 .small { font-size: .85rem; }
 .row { display:flex; align-items:center; gap:8px; }
 .spacer { flex:1; }
+.head .hd { min-width: 0; flex: 0 1 auto; }
 .head { display:flex; align-items:center; gap:10px; margin-bottom: 12px; flex-wrap: wrap; }
 button.b { font: inherit; cursor:pointer; border:1px solid var(--divider-color, #3a3f45); background: var(--secondary-background-color, #2a2d31);
   color: var(--primary-text-color, #e1e1e1); border-radius: 10px; padding: 7px 12px; display:inline-flex; gap:6px; align-items:center; }
@@ -356,22 +359,26 @@ button.b[disabled] { opacity:.5; cursor: default; }
 button.ic { background:none; border:none; color: inherit; cursor:pointer; padding:6px; border-radius: 50%; display:inline-flex; }
 button.ic:hover { background: rgba(127,127,127,.15); }
 ha-icon { --mdc-icon-size: 20px; }
-.grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(380px, 1fr)); gap: var(--tc-gap); }
+.grid { display:grid; grid-template-columns: repeat(auto-fill, minmax(min(380px, 100%), 1fr)); gap: var(--tc-gap); }
 .ell { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .tile { background: var(--card-background-color, #1f2124); border: 1px solid var(--divider-color, #33373c); border-radius: 14px; padding: 12px; display:flex; flex-direction:column; gap:10px; }
 .card-mode .tile { background: rgba(127,127,127,.06); }
-.tile .th { display:flex; align-items:center; gap:8px; }
+.tile .th { display:flex; align-items:center; gap:6px; min-width:0; }
+.tile .th .tn { flex: 1 1 auto; min-width: 70px; }
+.tile .th .ic { flex: none; }
 .nr { font-weight:700; background: rgba(127,127,127,.18); border-radius: 8px; padding: 2px 8px; font-variant-numeric: tabular-nums; }
 .chip { white-space:nowrap; display:inline-flex; align-items:center; gap:5px; border-radius: 999px; padding: 2px 9px; font-size: .8rem; font-weight:600; color:#fff; }
 .model { width:100%; height:auto; display:block; max-height: 420px; }
 .model .comp { cursor:pointer; transition: opacity .2s; }
-.model .comp:hover { opacity:.92; }
 .model .comp.dim { opacity:.35; }
 .blink { animation: blink 1.4s infinite; }
 @keyframes blink { 50% { opacity:.25; } }
 .list { display:flex; flex-direction:column; gap:4px; }
-.li { display:grid; grid-template-columns: auto 1fr auto auto auto; gap:10px; align-items:center; padding: 6px 8px; border-radius: 10px; cursor:pointer; }
-.li:hover { background: rgba(127,127,127,.1); }
+.li { display:grid; grid-template-columns: auto minmax(0,1fr) auto auto auto; gap:6px 10px; align-items:center; padding: 6px 8px; border-radius: 10px; cursor:pointer; }
+.qd { grid-column: 2 / -1; display:flex; flex-wrap:wrap; gap:6px; }
+.qb { width:40px; height:40px; border-radius: 10px; border:1px solid var(--divider-color, #3a3f45); background: rgba(127,127,127,.08); color: inherit; display:inline-flex; align-items:center; justify-content:center; cursor:pointer; padding:0; }
+.qb.on { border-color:#f9a825; background: rgba(249,168,37,.18); color:#f9a825; }
+.qb.na { opacity:.4; }
 .dot { width:10px; height:10px; border-radius:50%; display:inline-block; }
 .val { font-variant-numeric: tabular-nums; min-width: 52px; text-align:right; }
 .add-tile { align-items:center; justify-content:center; min-height: 200px; cursor:pointer; border-style: dashed; color: var(--tc-muted); }
@@ -388,6 +395,7 @@ ha-icon { --mdc-icon-size: 20px; }
 .devs { display:grid; grid-template-columns: repeat(auto-fill, minmax(120px, 1fr)); gap: 8px; }
 .dev { border:1px solid var(--divider-color, #3a3f45); border-radius: 12px; padding: 10px; cursor:pointer; display:flex; flex-direction:column; gap:4px; background: rgba(127,127,127,.06); }
 .dev.on { border-color: #f9a825; background: rgba(249,168,37,.14); }
+.dev.busy, .qb.busy { animation: blink .9s infinite; }
 .dev .dn { font-weight:600; font-size: .9rem; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
 .prob { display:flex; align-items:center; gap:8px; padding: 4px 0; }
 .locator { max-width: 260px; }
@@ -409,7 +417,7 @@ input:focus, select:focus { outline: 2px solid var(--primary-color, #03a9f4); ou
 .devrow { display:grid; grid-template-columns: 130px 1fr 1fr auto; gap: 8px; align-items:center; margin-bottom: 6px; }
 .err { color: #ef5350; font-weight: 600; }
 .ok { color: #66bb6a; }
-.actions { display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; position: sticky; bottom: 0; padding: 10px 0; background: linear-gradient(transparent, var(--primary-background-color, #111) 35%); }
+.actions { display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; position: sticky; bottom: 0; padding: 10px 0 calc(10px + env(safe-area-inset-bottom, 0px)); background: linear-gradient(transparent, var(--primary-background-color, #111) 35%); }
 .card-mode .actions { background: none; position: static; }
 .planned { display:flex; flex-direction:column; gap:6px; }
 .planned .pl { display:flex; align-items:center; gap:8px; opacity: .7; }
@@ -421,8 +429,42 @@ input:focus, select:focus { outline: 2px solid var(--primary-color, #03a9f4); ou
 .edsvg .eh { cursor: nwse-resize; }
 .clist .ci { display:flex; gap:8px; align-items:center; padding: 4px 6px; border-radius: 8px; cursor:pointer; }
 .clist .ci.sel { background: rgba(3,169,244,.18); }
-@media (max-width: 860px) { .det, .ed { grid-template-columns: 1fr; } .locator { max-width: 200px; } }
-@media (max-width: 480px) { .grid { grid-template-columns: 1fr; } .devrow { grid-template-columns: 1fr 1fr; } .li { grid-template-columns: auto 1fr auto auto; } .li .hide-s { display:none; } }
+@media (hover: hover) { .li:hover { background: rgba(127,127,127,.1); } .model .comp:hover { opacity:.92; } .dev:hover, .qb:hover { border-color: var(--primary-color, #03a9f4); } }
+/* touch devices (iPhone, iPad): bigger targets, 16px inputs = no zoom on focus */
+@media (pointer: coarse) {
+  button.b { min-height: 44px; }
+  button.ic { min-width: 44px; min-height: 44px; justify-content: center; }
+  input, select { font-size: 16px; min-height: 44px; }
+  .qb { width: 46px; height: 46px; }
+  .li { padding: 10px 8px; }
+  .dev { min-height: 76px; }
+  label.cb { min-height: 40px; }
+  input[type=checkbox] { width: 22px; height: 22px; min-height: 0; }
+}
+/* layout follows the width of the card/panel, not the screen */
+@container (max-width: 860px) {
+  .det, .ed { display:flex; flex-direction:column; }
+  .det .col, .ed .col { display: contents; }
+  .o1{order:1} .o2{order:2} .o3{order:3} .o4{order:4} .o5{order:5} .o6{order:6} .o7{order:7}
+  .ed .edbox { order:-1; } .ed .actions { order: 20; }
+  .locator { max-width: 240px; }
+}
+@container (max-width: 520px) {
+  .wrap { padding: 8px; }
+  .head h2 { font-size: 1.08rem; }
+  .head { flex-wrap: nowrap; gap: 6px; }
+  .tile, .box, .sec { padding: 10px; border-radius: 12px; }
+  .devrow { grid-template-columns: 1fr 1fr; }
+  .hide-s { display:none; }
+  .li { gap: 6px 8px; }
+  .val { min-width: 44px; }
+  .gauges { gap: 2px; }
+  .devs { grid-template-columns: repeat(auto-fill, minmax(104px, 1fr)); }
+  .fields { grid-template-columns: repeat(auto-fill, minmax(130px, 1fr)); }
+  .grid { gap: 10px; }
+  .add-tile { min-height: 80px; flex-direction: row; }
+  .chip { padding: 2px 7px; font-size: .75rem; }
+}
 `;
 
 /* ------------------------------------------------------------------ main view */
@@ -436,6 +478,8 @@ class TerrariumView extends HTMLElement {
     this._hist = {};
     this._targets = null;
     this._msg = "";
+    this._busy = {};
+    try { this._modelPref = JSON.parse(localStorage.getItem("terrarium-model") || "{}"); } catch (e) { this._modelPref = {}; }
     this._root = this.shadowRoot;
     this._root.addEventListener("click", (e) => this._click(e));
     this._root.addEventListener("input", (e) => this._input(e));
@@ -472,6 +516,8 @@ class TerrariumView extends HTMLElement {
 
   _onData(data) {
     this._data = data;
+    // a switched device reported its new state -> stop the "busy" blink
+    for (const [ent, prev] of Object.entries(this._busy)) if (this._devState(ent) !== prev) delete this._busy[ent];
     this._error = null;
     if (!this._initialRoute) {
       this._initialRoute = true;
@@ -481,6 +527,29 @@ class TerrariumView extends HTMLElement {
       }
     }
     if (["overview", "details"].includes(this._view.name)) this._render();
+  }
+
+  _devState(ent) {
+    for (const e of (this._data?.enclosures || [])) for (const c of e.compartments) for (const d of (c.live?.devices || [])) if (d.entity_id === ent) return d.state;
+    const s = this._hass && this._hass.states[ent];
+    return s ? s.state : null;
+  }
+
+  _modelShown(encId) {
+    if (encId in this._modelPref) return this._modelPref[encId];
+    const w = this.getBoundingClientRect().width || window.innerWidth;
+    return w >= 560; // phones: compact list first, model on demand
+  }
+
+  _quickButtons(c) {
+    const devs = c.live?.devices || c.devices || [];
+    if (!devs.length) return "";
+    return `<div class="qd">${devs.map((d) => {
+      const st = this._devState(d.entity_id), on = isOn(st), na = st === null || st === "unavailable";
+      const s = this._hass.states[d.entity_id];
+      const name = d.name || (s && s.attributes.friendly_name) || d.entity_id;
+      return `<button class="qb ${on ? "on" : ""} ${na ? "na" : ""} ${this._busy[d.entity_id] !== undefined ? "busy" : ""}" data-act="toggle" data-ent="${esc(d.entity_id)}" title="${esc(name)}: ${on ? this.t("on") : this.t("off")}" aria-label="${esc(name)}"><ha-icon icon="${KIND_ICON[d.kind] || KIND_ICON.other}"></ha-icon></button>`;
+    }).join("")}</div>`;
   }
 
   _encs() {
@@ -529,19 +598,22 @@ class TerrariumView extends HTMLElement {
       const comps = enc.compartments;
       const bad = comps.filter((c) => ["alarm", "offline"].includes(c.live?.status)).length;
       const pend = comps.filter((c) => c.live?.status === "pending").length;
-      h += `<div class="tile"><div class="th"><span class="nr">${enc.nr}</span><b class="ell">${esc(enc.name || this.t("enclosure") + " " + enc.nr)}</b>`;
-      h += `<span class="muted small" style="white-space:nowrap">${enc.width}×${enc.height} cm</span><span class="spacer"></span>`;
+      h += `<div class="tile"><div class="th"><span class="nr">${enc.nr}</span><b class="ell tn">${esc(enc.name || this.t("enclosure") + " " + enc.nr)}</b>`;
+      h += `<span class="muted small hide-s" style="white-space:nowrap">${enc.width}×${enc.height} cm</span>`;
       if (bad) h += `<span class="chip" style="background:${STATUS_COLOR.alarm}">${bad} × ${this.t("status_alarm")}</span>`;
       else if (pend) h += `<span class="chip" style="background:${STATUS_COLOR.pending}">${pend} × ${this.t("status_pending")}</span>`;
+      const shown = this._modelShown(enc.id);
+      if (comps.length) h += `<button class="ic" data-act="model" data-enc="${esc(enc.id)}" title="${this.t(shown ? "model_hide" : "model_show")}"><ha-icon icon="${shown ? "mdi:view-list" : "mdi:image-outline"}"></ha-icon></button>`;
       if (this.admin) h += `<button class="ic" data-act="enc-edit" data-enc="${esc(enc.id)}" title="${this.t("edit")}"><ha-icon icon="mdi:pencil-ruler"></ha-icon></button>`;
-      h += `</div>${comps.length ? enclosureSVG(enc) : `<div class="muted small">${this.t("none_selected")}</div>`}<div class="list">`;
+      h += `</div>${comps.length ? (shown ? enclosureSVG(enc) : "") : `<div class="muted small">${this.t("none_selected")}</div>`}<div class="list">`;
       for (const c of comps) {
         const L = c.live || {};
         h += `<div class="li" data-act="open" data-comp="${esc(c.id)}"><span class="nr">${esc(c.label)}</span>`;
         h += `<span class="ell">${esc(c.name || "–")}${c.animal ? ` <span class="muted small hide-s">· ${esc(c.animal)}</span>` : ""}</span>`;
         h += `<span class="val">${L.temperature !== null && L.temperature !== undefined ? fmt(L.temperature) + " °C" : "–"}</span>`;
         h += `<span class="val">${L.humidity !== null && L.humidity !== undefined ? fmt(L.humidity, 0) + " %" : "–"}</span>`;
-        h += `<span class="dot" style="background:${STATUS_COLOR[L.status || "not_configured"]}" title="${esc(this.t("status_" + (L.status || "not_configured")))}"></span></div>`;
+        h += `<span class="dot" style="background:${STATUS_COLOR[L.status || "not_configured"]}" title="${esc(this.t("status_" + (L.status || "not_configured")))}"></span>`;
+        h += this._quickButtons(c) + `</div>`;
       }
       h += `</div></div>`;
     }
@@ -556,52 +628,52 @@ class TerrariumView extends HTMLElement {
     const tg = L.targets || {};
     const st = L.status || "not_configured";
     let h = `<div class="wrap"><div class="head"><button class="ic" data-act="back" title="${this.t("back")}"><ha-icon icon="mdi:arrow-left"></ha-icon></button>`;
-    h += `<span class="nr">${esc(c.label)}</span><div><h2>${esc(c.name || this.t("enclosure") + " " + c.label)}</h2>${c.animal ? `<div class="muted small">${esc(c.animal)}</div>` : ""}</div>`;
+    h += `<span class="nr">${esc(c.label)}</span><div class="hd"><h2 class="ell">${esc(c.name || this.t("enclosure") + " " + c.label)}</h2>${c.animal ? `<div class="muted small ell">${esc(c.animal)}</div>` : ""}</div>`;
     h += this._statusChip(st) + `<span class="spacer"></span>`;
-    if (this.admin) h += `<button class="b" data-act="comp-settings" data-comp="${esc(c.id)}"><ha-icon icon="mdi:cog"></ha-icon>${this.t("settings")}</button>`;
-    h += `</div><div class="det"><div class="col"><div class="box">${enclosureSVG(enc, { onlyComp: { ...c }, labels: false })}</div>`;
-    if (enc.compartments.length > 1) h += `<div class="box"><div class="muted small" style="margin-bottom:6px">${esc(enc.name || this.t("enclosure") + " " + enc.nr)}</div><div class="locator">${enclosureSVG(enc, { highlight: c.id, values: false })}</div></div>`;
+    if (this.admin) h += `<button class="b" data-act="comp-settings" data-comp="${esc(c.id)}" title="${this.t("settings")}"><ha-icon icon="mdi:cog"></ha-icon><span class="hide-s">${this.t("settings")}</span></button>`;
+    h += `</div><div class="det"><div class="col"><div class="box o4">${enclosureSVG(enc, { onlyComp: { ...c }, labels: false })}</div>`;
+    if (enc.compartments.length > 1) h += `<div class="box o6"><div class="muted small" style="margin-bottom:6px">${esc(enc.name || this.t("enclosure") + " " + enc.nr)}</div><div class="locator">${enclosureSVG(enc, { highlight: c.id, values: false })}</div></div>`;
     h += `</div><div class="col">`;
     // gauges
     const period = L.period === "night" ? this.t("night_values") : this.t("day_values");
     const tcol = STATUS_COLOR[(L.problems || []).concat(L.pending || []).some((p) => p.startsWith("temp")) ? (L.problems || []).some((p) => p.startsWith("temp")) ? "alarm" : "pending" : "ok"];
     const hcol = STATUS_COLOR[(L.problems || []).concat(L.pending || []).some((p) => p.startsWith("hum")) ? (L.problems || []).some((p) => p.startsWith("hum")) ? "alarm" : "pending" : "ok"];
-    h += `<div class="box"><div class="row" style="margin-bottom:6px"><h3 style="margin:0">${this.t("temperature")} & ${this.t("humidity")}</h3><span class="spacer"></span><span class="muted small"><ha-icon icon="${L.period === "night" ? "mdi:weather-night" : "mdi:weather-sunny"}" style="--mdc-icon-size:16px"></ha-icon> ${period}</span></div><div class="gauges">`;
+    h += `<div class="box o1"><div class="row" style="margin-bottom:6px"><h3 style="margin:0">${this.t("temperature")} & ${this.t("humidity")}</h3><span class="spacer"></span><span class="muted small"><ha-icon icon="${L.period === "night" ? "mdi:weather-night" : "mdi:weather-sunny"}" style="--mdc-icon-size:16px"></ha-icon> ${period}</span></div><div class="gauges">`;
     const tmin = Math.min(15, (tg.temp_min ?? 15) - 5), tmax = Math.max(40, (tg.temp_max ?? 40) + 5);
     h += `<div>${gaugeSVG(L.temperature, num(tg.temp_min), num(tg.temp_max), Math.floor(tmin / 5) * 5, Math.ceil(tmax / 5) * 5, "°C", tcol, 1)}<div class="gl">${this.t("temperature")}<br><span class="muted">${this.t("target")} ${this._range(tg.temp_min, tg.temp_max, "°C")}</span></div></div>`;
     h += `<div>${gaugeSVG(L.humidity, num(tg.hum_min), num(tg.hum_max), 0, 100, "%", hcol, 0)}<div class="gl">${this.t("humidity")}<br><span class="muted">${this.t("target")} ${this._range(tg.hum_min, tg.hum_max, "%")}</span></div></div>`;
     h += `</div></div>`;
     // problems
-    h += `<div class="box"><h3>${this.t("problems")}</h3>`;
+    h += `<div class="box o3"><h3>${this.t("problems")}</h3>`;
     if (st === "not_configured") h += `<div class="muted">${this.t("not_configured_hint")}</div>`;
     else if (!(L.problems || []).length && !(L.pending || []).length) h += `<div class="ok">${this.t("all_good")}</div>`;
     for (const p of (L.problems || [])) h += `<div class="prob"><span class="dot" style="background:${STATUS_COLOR.alarm}"></span>${esc(this.t("p_" + p))}<span class="muted small">${this._since(L.since?.[p])}</span></div>`;
     for (const p of (L.pending || [])) h += `<div class="prob"><span class="dot" style="background:${STATUS_COLOR.pending}"></span>${esc(this.t("p_" + p))}<span class="muted small">${this._since(L.since?.[p])}</span></div>`;
     h += `</div>`;
     // devices
-    h += `<div class="box"><h3>${this.t("devices")}</h3>`;
+    h += `<div class="box o2"><h3>${this.t("devices")}</h3>`;
     const devs = L.devices || c.devices || [];
     if (!devs.length) h += `<div class="muted small">${this.t("no_devices")}</div>`;
     else {
       h += `<div class="devs">`;
       for (const d of devs) {
         const s = this._hass.states[d.entity_id];
-        const state = s ? s.state : null;
+        const state = this._devState(d.entity_id);
         const on = isOn(state);
         const name = d.name || (s && s.attributes.friendly_name) || d.entity_id;
-        h += `<div class="dev ${on ? "on" : ""}" data-act="toggle" data-ent="${esc(d.entity_id)}"><ha-icon icon="${KIND_ICON[d.kind] || KIND_ICON.other}" style="color:${on ? "#f9a825" : "inherit"}"></ha-icon>`;
+        h += `<div class="dev ${on ? "on" : ""} ${this._busy[d.entity_id] !== undefined ? "busy" : ""}" role="button" data-act="toggle" data-ent="${esc(d.entity_id)}"><ha-icon icon="${KIND_ICON[d.kind] || KIND_ICON.other}" style="color:${on ? "#f9a825" : "inherit"}"></ha-icon>`;
         h += `<span class="dn">${esc(name)}</span><span class="muted small">${state === null || state === "unavailable" ? this.t("unavailable") : on ? this.t("on") : this.t("off")}</span></div>`;
       }
       h += `</div>`;
     }
     h += `</div>`;
     // history
-    h += `<div class="box"><h3>${this.t("last24")}</h3><div class="muted small">${this.t("temperature")}</div><div id="ch-t">${this._chart(c, "temperature")}</div>`;
+    h += `<div class="box o5"><h3>${this.t("last24")}</h3><div class="muted small">${this.t("temperature")}</div><div id="ch-t">${this._chart(c, "temperature")}</div>`;
     h += `<div class="muted small" style="margin-top:6px">${this.t("humidity")}</div><div id="ch-h">${this._chart(c, "humidity")}</div></div>`;
     // sensors
     const sens = [...(L.temp_sensors || []).map((s) => ({ ...s, u: "°C" })), ...(L.hum_sensors || []).map((s) => ({ ...s, u: "%" }))];
     if (sens.length) {
-      h += `<div class="box"><h3>${this.t("sensors")}</h3>`;
+      h += `<div class="box o7"><h3>${this.t("sensors")}</h3>`;
       for (const s of sens) h += `<div class="row small" style="padding:3px 0"><span>${esc(s.name)}</span><span class="spacer"></span><span class="val">${s.value === null ? this.t("unavailable") : fmt(s.value, s.u === "%" ? 0 : 1) + " " + s.u}</span></div>`;
       h += `</div>`;
     }
@@ -819,7 +891,7 @@ class TerrariumView extends HTMLElement {
       s += `<text x="${c.x + c.width / 2}" y="${c.y + c.height / 2}" font-size="${fs}" fill="#fff" text-anchor="middle" font-weight="700" pointer-events="none">${esc(labels[c.id])}</text>`;
       s += `<text x="${c.x + c.width / 2}" y="${c.y + c.height / 2 + fs * 1.05}" font-size="${fs * 0.6}" fill="#cfd8dc" text-anchor="middle" pointer-events="none">${esc(c.name || "")} ${c.width.toFixed(0)}×${c.height.toFixed(0)}</text></g>`;
       if (sel) {
-        const hs = m * 0.035;
+        const hs = m * (matchMedia("(pointer: coarse)").matches ? 0.07 : 0.035);
         s += `<rect class="eh" data-c="${esc(c.id)}" data-h="1" x="${c.x + c.width - hs}" y="${c.y + c.height - hs}" width="${hs}" height="${hs}" fill="#03a9f4" stroke="#fff" stroke-width="${m * 0.003}"/>`;
       }
     }
@@ -843,7 +915,7 @@ class TerrariumView extends HTMLElement {
     h += `<div class="fields" style="margin-top:10px"><label class="f">${this.t("snap")}<select data-g="snap">${[0.5, 1, 2.5, 5, 10].map((s) => `<option value="${s}" ${v.snap === s ? "selected" : ""}>${s} cm</option>`).join("")}</select></label></div></div>`;
     h += `<div class="sec"><h3>${this.t("selected")}</h3><div id="selbox">${this._selBox(sel, labels)}</div></div>`;
     h += `<div class="sec"><h3>${this.t("compartments")}</h3><div class="muted small" style="margin-bottom:6px">${this.t("numbering_hint")}</div><div class="clist" id="clist">${this._compList(d, labels)}</div></div>`;
-    h += `</div><div class="col"><div class="box"><svg class="edsvg" id="edsvg" viewBox="${-pad} ${-pad} ${d.width + 2 * pad} ${d.height + 2 * pad}" xmlns="http://www.w3.org/2000/svg"><g id="lay">${this._editorSVGInner()}</g></svg></div>`;
+    h += `</div><div class="col"><div class="box edbox"><svg class="edsvg" id="edsvg" viewBox="${-pad} ${-pad} ${d.width + 2 * pad} ${d.height + 2 * pad}" xmlns="http://www.w3.org/2000/svg"><g id="lay">${this._editorSVGInner()}</g></svg></div>`;
     h += `<div class="actions">${d.id ? `<button class="b warn" data-act="enc-delete"><ha-icon icon="mdi:delete"></ha-icon>${this.t("delete")}</button>` : ""}<span id="msg" class="${this._msgErr ? "err" : "ok"}">${esc(this._msg)}</span><span class="spacer"></span><button class="b" data-act="enc-cancel">${this.t("cancel")}</button><button class="b pri" data-act="enc-save"><ha-icon icon="mdi:content-save"></ha-icon>${this.t("save")}</button></div></div>`;
     return h + `</div></div>`;
   }
@@ -966,8 +1038,19 @@ class TerrariumView extends HTMLElement {
         break;
       }
       case "back": this._view = { name: "overview" }; this._render(); break;
+      case "model": {
+        e.stopPropagation();
+        this._modelPref[el.dataset.enc] = !this._modelShown(el.dataset.enc);
+        try { localStorage.setItem("terrarium-model", JSON.stringify(this._modelPref)); } catch (err) { /* private mode */ }
+        this._render();
+        break;
+      }
       case "toggle": {
+        e.stopPropagation();
         const ent = el.dataset.ent, domain = ent.split(".")[0];
+        this._busy[ent] = this._devState(ent);
+        el.classList.add("busy");
+        setTimeout(() => { if (this._busy[ent] !== undefined) { delete this._busy[ent]; if (["overview", "details"].includes(this._view.name)) this._render(); } }, 6000);
         if (domain === "script") this._hass.callService("script", "turn_on", { entity_id: ent });
         else if (domain === "automation") this._hass.callService("automation", "trigger", { entity_id: ent });
         else this._hass.callService("homeassistant", "toggle", { entity_id: ent });

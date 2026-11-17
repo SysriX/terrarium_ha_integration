@@ -35,6 +35,24 @@ The integration brings its own **sidebar panel** (and a Lovelace card) with an o
 
 ![Layout editor](docs/images/editor.png)
 
+## Phone, tablet, desktop
+
+The view adapts to the width of the panel or card (container queries), so it works the same in a desktop browser
+(Mac/Windows), on an iPad (portrait and landscape) and on an iPhone:
+
+- **Phone = quick control:** compact list with temperature, humidity and status, and the devices of every terrarium
+  as **one-tap buttons** right in the list (light, rain, fan …) – no need to open the terrarium. The drawn model is
+  folded away on phones and can be shown per enclosure (the choice is remembered on the device).
+- **Detail view on narrow screens:** values first, then devices, notices, model and history.
+- **Touch:** 44 px touch targets, 16 px inputs (no zoom on iOS when typing), bigger resize handle in the
+  layout editor, save bar respects the iPhone safe area.
+
+<p>
+  <img src="docs/images/phone.png" width="260" alt="Phone overview">
+  &nbsp;
+  <img src="docs/images/phone-details.png" width="260" alt="Phone detail view">
+</p>
+
 ## Planned
 
 Light control (times, sunrise/sunset), ventilation control and rain simulation – the settings page already
