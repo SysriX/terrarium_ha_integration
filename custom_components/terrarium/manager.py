@@ -1,11 +1,9 @@
-"""Terrarium manager: storage, climate evaluation and notifications."""
+"""Terrarium manager: data, climate evaluation, notifications, automation and persistence."""
 from __future__ import annotations
 
 import copy
 import logging
-import uuid
-from datetime import datetime, time, timedelta
-from typing import Any
+from datetime import datetime, timedelta
 
 from homeassistant.components import persistent_notification
 from homeassistant.config_entries import ConfigEntry
@@ -15,24 +13,28 @@ from homeassistant.helpers import device_registry as dr
 from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.dispatcher import async_dispatcher_send
 from homeassistant.helpers.event import async_track_state_change_event, async_track_time_interval
-from homeassistant.helpers.storage import Store
 from homeassistant.util import dt as dt_util
 
+from .automation import Automation
 from .const import (
-    DEFAULT_COMPARTMENT, DEFAULT_ENCLOSURE, DEVICE_KINDS, DOMAIN, ENCLOSURE_COLORS, EVENT_ALARM,
-    LOOK_BACKGROUNDS, LOOK_DECOR, LOOK_SUBSTRATES, P_HUM_HIGH, P_HUM_LOW, P_OFFLINE, P_TEMP_HIGH,
-    P_TEMP_LOW, S_ALARM, S_NOT_CONFIGURED, S_OFFLINE, S_OK, S_PENDING, SIGNAL_UPDATE, STORE_VERSION,
+    DOMAIN, EVENT_ALARM, KINDS, P_HUM_HIGH, P_HUM_LOW, P_OFFLINE, P_TEMP_HIGH, P_TEMP_LOW, S_ALARM,
+    S_NOT_CONFIGURED, S_OFFLINE, S_OK, S_PENDING, SIGNAL_UPDATE,
 )
+from .model import (
+    LayoutError, apply_template, deep_update, default_light_types, kind_config_of, normalize_enclosure, num,
+    parse_time, sanitize_compartment_settings, sanitize_group, sanitize_kind_config, sanitize_light_type,
+    sanitize_template,
+)
+from .persist import Persistence
 
 _LOGGER = logging.getLogger(__name__)
-
-EPS = 0.01
 
 # entity keys per platform (used for renaming entity ids after renumbering)
 COMP_ENTITY_KEYS = {
     "sensor": ["temperature", "humidity", "status"],
     "binary_sensor": ["problem"],
-    "switch": ["cfg_notify"],
+    "switch": ["cfg_notify", "cfg_light_auto", "cfg_rain_auto", "cfg_vent_auto"],
+    "button": ["rain_now"],
 }
 
 TEXTS = {
@@ -46,6 +48,7 @@ TEXTS = {
         "repeat": "Weiterhin: ",
         "test": "Testmeldung – Benachrichtigungen funktionieren.",
         "title": "Terrarium {label}",
+        "group": "Gruppe",
     },
     "en": {
         P_TEMP_LOW: "Temperature too low: {value} °C (min. {limit} °C)",
@@ -57,177 +60,51 @@ TEXTS = {
         "repeat": "Still: ",
         "test": "Test message – notifications are working.",
         "title": "Terrarium {label}",
+        "group": "Group",
     },
 }
-
-
-def _num(value: Any) -> float | None:
-    if value is None or value == "":
-        return None
-    try:
-        return float(value)
-    except (TypeError, ValueError):
-        return None
-
-
-def merge_known(default: Any, incoming: Any) -> Any:
-    """Deep-merge incoming onto default, keeping only keys known in default."""
-    if isinstance(default, dict):
-        src = incoming if isinstance(incoming, dict) else {}
-        out = {}
-        for key, dval in default.items():
-            if key in src:
-                out[key] = merge_known(dval, src[key])
-            else:
-                out[key] = copy.deepcopy(dval)
-        return out
-    if isinstance(default, list):
-        return copy.deepcopy(incoming) if isinstance(incoming, list) else copy.deepcopy(default)
-    if isinstance(default, bool):
-        return bool(incoming) if incoming is not None else default
-    if isinstance(default, (int, float)) and not isinstance(default, bool):
-        n = _num(incoming)
-        return n if n is not None else default
-    if default is None:
-        # numbers that may be empty
-        return _num(incoming)
-    if isinstance(default, str):
-        return str(incoming) if incoming is not None else default
-    return incoming
-
-
-def deep_update(base: dict, upd: dict) -> dict:
-    """Recursive merge (dicts merged, everything else replaced)."""
-    out = copy.deepcopy(base)
-    for key, val in (upd or {}).items():
-        if isinstance(val, dict) and isinstance(out.get(key), dict):
-            out[key] = deep_update(out[key], val)
-        else:
-            out[key] = copy.deepcopy(val)
-    return out
-
-
-def _entity_list(value: Any) -> list[str]:
-    if not isinstance(value, list):
-        return []
-    out = []
-    for item in value:
-        if isinstance(item, str) and "." in item and item not in out:
-            out.append(item.strip())
-    return out
-
-
-def sanitize_compartment_settings(comp: dict) -> dict:
-    """Normalize the settings part of a compartment (everything except layout)."""
-    out = merge_known(DEFAULT_COMPARTMENT, comp)
-    # keep reserved module dicts as they are
-    for key in ("light", "ventilation", "rain"):
-        if isinstance(comp.get(key), dict):
-            out[key] = copy.deepcopy(comp[key])
-    clim = out["climate"]
-    clim["temp_sensors"] = _entity_list(clim["temp_sensors"])
-    clim["hum_sensors"] = _entity_list(clim["hum_sensors"])
-    clim["delay"] = max(0.0, clim["delay"])
-    clim["temp_hyst"] = max(0.0, clim["temp_hyst"])
-    clim["hum_hyst"] = max(0.0, clim["hum_hyst"])
-    for key in ("start", "end"):
-        if _parse_time(clim["night"][key]) is None:
-            clim["night"][key] = DEFAULT_COMPARTMENT["climate"]["night"][key]
-    notify = out["notify"]
-    notify["targets"] = _entity_list(notify["targets"])
-    notify["repeat"] = max(0.0, notify["repeat"])
-    devices = []
-    for dev in comp.get("devices") or []:
-        if not isinstance(dev, dict):
-            continue
-        ent = str(dev.get("entity_id") or "").strip()
-        if "." not in ent:
-            continue
-        kind = dev.get("kind") if dev.get("kind") in DEVICE_KINDS else "other"
-        devices.append({"entity_id": ent, "kind": kind, "name": str(dev.get("name") or "")})
-    out["devices"] = devices
-    look = out["look"]
-    if look["substrate"] not in LOOK_SUBSTRATES:
-        look["substrate"] = "soil"
-    if look["decor"] not in LOOK_DECOR:
-        look["decor"] = "plants"
-    if look["background"] not in LOOK_BACKGROUNDS:
-        look["background"] = "rock"
-    return out
-
-
-def _parse_time(value: Any) -> time | None:
-    try:
-        parts = str(value).split(":")
-        return time(int(parts[0]), int(parts[1]))
-    except (ValueError, IndexError, TypeError):
-        return None
 
 
 def label_of(enc: dict, comp: dict) -> str:
     return f"{enc['nr']}.{comp['nr']}"
 
 
-def number_compartments(comps: list[dict]) -> None:
-    """Number compartments top -> bottom, left -> right."""
-    order = sorted(comps, key=lambda c: (round(c["y"], 1), round(c["x"], 1)))
-    for idx, comp in enumerate(order, start=1):
-        comp["nr"] = idx
-    comps.sort(key=lambda c: c["nr"])
-
-
-class LayoutError(ValueError):
-    """Invalid enclosure layout. args[0] = error key, args[1] = details."""
-
-
-def validate_layout(enc: dict) -> None:
-    width, height = enc["width"], enc["height"]
-    if width <= 0 or height <= 0:
-        raise LayoutError("size", "")
-    comps = enc["compartments"]
-    for comp in comps:
-        if comp["width"] <= 0 or comp["height"] <= 0:
-            raise LayoutError("comp_size", comp.get("name") or comp["id"])
-        if (comp["x"] < -EPS or comp["y"] < -EPS or comp["x"] + comp["width"] > width + EPS
-                or comp["y"] + comp["height"] > height + EPS):
-            raise LayoutError("out_of_bounds", comp.get("name") or comp["id"])
-    for i, a in enumerate(comps):
-        for b in comps[i + 1:]:
-            if (a["x"] < b["x"] + b["width"] - EPS and b["x"] < a["x"] + a["width"] - EPS
-                    and a["y"] < b["y"] + b["height"] - EPS and b["y"] < a["y"] + a["height"] - EPS):
-                raise LayoutError("overlap", f"{a.get('name') or a['id']} / {b.get('name') or b['id']}")
-
-
 class TerrariumManager:
-    """Holds all enclosures and evaluates their climate."""
+    """Holds all data, evaluates climate, runs the automation."""
 
-    def __init__(self, hass: HomeAssistant, entry: ConfigEntry) -> None:
+    def __init__(self, hass: HomeAssistant, entry: ConfigEntry, db_url: str = "") -> None:
         self.hass = hass
         self.entry = entry
-        self.store: Store = Store(hass, STORE_VERSION, DOMAIN)
-        self.enclosures: list[dict] = []
+        self.persist = Persistence(hass, db_url)
+        self.state: dict = {"enclosures": [], "groups": [], "templates": [], "light_types": [], "settings": {}}
         self.live: dict[str, dict] = {}
-        # comp_id -> problem key -> {"since", "active", "last", "value", "limit"}
         # kept in hass.data so a reload (after editing an enclosure) does not re-send active alarms
         self._track: dict[str, dict[str, dict]] = hass.data.setdefault(DOMAIN, {}).setdefault("track", {})
+        self.auto = Automation(self)
         self._unsub_states = None
         self._unsub_timer = None
+        self._unsub_slow = None
 
-    # ------------------------------------------------------------------ storage
-    async def async_load(self) -> None:
-        data = await self.store.async_load() or {}
-        encs = []
-        for raw in data.get("enclosures", []):
-            try:
-                encs.append(self._normalize_enclosure(raw, raw))
-            except (LayoutError, KeyError, TypeError) as err:
-                _LOGGER.warning("Terrarienanlage verworfen (%s): %s", err, raw.get("name"))
-        self.enclosures = sorted(encs, key=lambda e: e["nr"])
+    # ------------------------------------------------------------------ data access
+    @property
+    def enclosures(self) -> list[dict]:
+        return self.state["enclosures"]
 
-    async def async_save(self) -> None:
-        await self.store.async_save({"enclosures": self.enclosures})
+    @property
+    def groups(self) -> list[dict]:
+        return self.state["groups"]
 
-    # ------------------------------------------------------------------ lookup
+    @property
+    def templates(self) -> list[dict]:
+        return self.state["templates"]
+
+    @property
+    def light_types(self) -> list[dict]:
+        return self.state["light_types"]
+
+    def light_type(self, type_id: str) -> dict | None:
+        return next((t for t in self.light_types if t["id"] == type_id), None)
+
     def find(self, comp_id: str) -> tuple[dict, dict] | tuple[None, None]:
         for enc in self.enclosures:
             for comp in enc["compartments"]:
@@ -238,54 +115,131 @@ class TerrariumManager:
     def enclosure(self, enc_id: str) -> dict | None:
         return next((e for e in self.enclosures if e["id"] == enc_id), None)
 
-    def structure(self) -> set[tuple[str, str]]:
-        """Set of (enclosure id, compartment id) incl. enclosure-only rows."""
-        out = set()
-        for enc in self.enclosures:
-            out.add((enc["id"], ""))
-            for comp in enc["compartments"]:
-                out.add((enc["id"], comp["id"]))
+    def comp_ids(self) -> set[str]:
+        return {c["id"] for e in self.enclosures for c in e["compartments"]}
+
+    def group_of(self, comp_id: str, kind: str) -> dict | None:
+        return next((g for g in self.groups if g["kind"] == kind and comp_id in g["members"]), None)
+
+    def effective(self, comp: dict, kind: str) -> dict:
+        grp = self.group_of(comp["id"], kind)
+        return grp["config"] if grp else kind_config_of(kind, comp)
+
+    def units(self) -> list[dict]:
+        """Everything that is switched together: groups + terrariums without a group of that kind."""
+        by_id = {c["id"]: (e, c) for e in self.enclosures for c in e["compartments"]}
+        out = []
+        grouped: dict[str, set[str]] = {k: set() for k in KINDS}
+        for grp in self.groups:
+            members = [by_id[m] for m in grp["members"] if m in by_id]
+            if not members:
+                continue
+            grouped[grp["kind"]].update(c["id"] for _e, c in members)
+            labels = ", ".join(label_of(e, c) for e, c in members)
+            out.append({"id": f"g_{grp['id']}_{grp['kind']}", "kind": grp["kind"], "group": grp["id"],
+                        "name": grp["name"] or labels, "members": members, "cfg": grp["config"]})
+        for e, c in by_id.values():
+            for kind in KINDS:
+                if c["id"] not in grouped[kind]:
+                    out.append({"id": f"c_{c['id']}_{kind}", "kind": kind, "group": None, "name": label_of(e, c),
+                                "members": [(e, c)], "cfg": kind_config_of(kind, c)})
         return out
 
-    # ------------------------------------------------------------------ editing
-    def _normalize_enclosure(self, raw: dict, existing: dict | None) -> dict:
-        enc = merge_known({k: v for k, v in DEFAULT_ENCLOSURE.items() if k != "compartments"}, raw)
-        enc["id"] = str(raw.get("id") or uuid.uuid4().hex[:10])
-        enc["nr"] = int(enc["nr"]) if enc["nr"] else 1
-        if enc["color"] not in ENCLOSURE_COLORS:
-            enc["color"] = "wood"
-        old = {c["id"]: c for c in (existing or {}).get("compartments", []) if isinstance(c, dict) and c.get("id")}
-        comps = []
-        for rc in raw.get("compartments") or []:
-            cid = str(rc.get("id") or uuid.uuid4().hex[:10])
-            base = old.get(cid, {})
-            settings = sanitize_compartment_settings(
-                deep_update(base, {k: v for k, v in rc.items() if k in DEFAULT_COMPARTMENT}))
-            comp = {
-                "id": cid,
-                "nr": 0,
-                "x": _num(rc.get("x")) or 0.0,
-                "y": _num(rc.get("y")) or 0.0,
-                "width": _num(rc.get("width")) or 0.0,
-                "height": _num(rc.get("height")) or 0.0,
-                **settings,
-            }
-            comps.append(comp)
-        enc["compartments"] = comps
-        validate_layout(enc)
-        number_compartments(comps)
-        return enc
+    def unit_of(self, comp_id: str, kind: str) -> dict | None:
+        grp = self.group_of(comp_id, kind)
+        uid = f"g_{grp['id']}_{kind}" if grp else f"c_{comp_id}_{kind}"
+        return next((u for u in self.units() if u["id"] == uid), None)
 
+    def features(self, comp: dict) -> dict[str, bool]:
+        """Which automation entities a terrarium gets."""
+        return {
+            "light": bool(self.effective(comp, "light")["lights"]),
+            "rain": bool(self.effective(comp, "rain")["rain"].get("entity_id")),
+            "vent": bool(self.effective(comp, "vent")["vent"].get("entity_id")),
+        }
+
+    def structure(self) -> set[tuple]:
+        """Changes here need a reload (entities/devices come and go)."""
+        out = set()
+        for enc in self.enclosures:
+            out.add((enc["id"], "", ""))
+            for comp in enc["compartments"]:
+                f = self.features(comp)
+                out.add((enc["id"], comp["id"], f"{f['light']}{f['rain']}{f['vent']}"))
+        return out
+
+    # ------------------------------------------------------------------ loading / saving
+    async def async_load(self) -> None:
+        state = await self.persist.async_load()
+        encs = []
+        for raw in state.get("enclosures", []):
+            try:
+                encs.append(normalize_enclosure(raw, raw))
+            except (LayoutError, KeyError, TypeError) as err:
+                _LOGGER.warning("Terrarienanlage verworfen (%s): %s", err, raw.get("name"))
+        ids = {c["id"] for e in encs for c in e["compartments"]}
+        groups = []
+        for raw in state.get("groups", []):
+            try:
+                groups.append(sanitize_group(raw, ids))
+            except LayoutError:
+                pass
+        templates = []
+        for raw in state.get("templates", []):
+            try:
+                templates.append(sanitize_template(raw))
+            except LayoutError:
+                pass
+        types = [sanitize_light_type(t) for t in state.get("light_types", [])]
+        seeded = bool((state.get("settings") or {}).get("light_types_seeded"))
+        settings = dict(state.get("settings") or {})
+        if not seeded:
+            have = {t["id"] for t in types}
+            types += [t for t in default_light_types() if t["id"] not in have]
+            settings["light_types_seeded"] = True
+        self.state = {"enclosures": sorted(encs, key=lambda e: e["nr"]), "groups": groups, "templates": templates,
+                      "light_types": types, "settings": settings}
+        if not seeded:
+            await self.async_save()
+
+    async def async_save(self) -> None:
+        await self.persist.async_save(self.state)
+
+    def notify_update(self) -> None:
+        async_dispatcher_send(self.hass, SIGNAL_UPDATE)
+
+    def new_comp_defaults(self) -> dict:
+        """Settings for new terrariums from templates marked 'default for new terrariums'."""
+        out: dict = {}
+        for kind in KINDS:
+            tpl = next((t for t in self.templates if t["kind"] == kind and t["default_new"]), None)
+            if tpl:
+                out.update(apply_template(kind, kind_config_of(kind, {}), tpl))
+        return out
+
+    async def _after_change(self, old_labels: dict | None = None) -> bool:
+        """Save, rename entities, re-evaluate. Returns True when the entry must be reloaded."""
+        await self.async_save()
+        self._rename_entities(old_labels or {})
+        changed = self._structure_before != self.structure()
+        if not changed:
+            self._resubscribe()
+            self.evaluate_all()
+        return changed
+
+    def _mark(self) -> dict:
+        self._structure_before = self.structure()
+        return self._labels()
+
+    # ------------------------------------------------------------------ enclosures
     async def async_save_enclosure(self, raw: dict) -> tuple[dict, bool]:
-        """Create or update an enclosure. Returns (enclosure, structure_changed)."""
-        before = self.structure()
-        old_labels = self._labels()
+        old_labels = self._mark()
         existing = self.enclosure(raw.get("id")) if raw.get("id") else None
         if existing is None:
             raw = {**raw, "id": None}
             if not raw.get("nr"):
                 raw["nr"] = max((e["nr"] for e in self.enclosures), default=0) + 1
-        enc = self._normalize_enclosure(raw, existing)
+        enc = normalize_enclosure(raw, existing, self.new_comp_defaults())
         if any(e["nr"] == enc["nr"] and e["id"] != enc["id"] for e in self.enclosures):
             raise LayoutError("nr_taken", str(enc["nr"]))
         if existing is None:
@@ -293,13 +247,8 @@ class TerrariumManager:
         else:
             self.enclosures[self.enclosures.index(existing)] = enc
         self.enclosures.sort(key=lambda e: e["nr"])
-        await self.async_save()
-        self._rename_entities(old_labels)
-        changed = before != self.structure()
-        if not changed:
-            self._resubscribe()
-            self.evaluate_all()
-        return enc, changed
+        self._clean_groups()
+        return enc, await self._after_change(old_labels)
 
     async def async_delete_enclosure(self, enc_id: str) -> None:
         enc = self.enclosure(enc_id)
@@ -309,19 +258,49 @@ class TerrariumManager:
         for comp in enc["compartments"]:
             self._track.pop(comp["id"], None)
             self.live.pop(comp["id"], None)
+        self._clean_groups()
         await self.async_save()
 
-    async def async_save_compartment(self, comp_id: str, settings: dict) -> dict:
+    def _clean_groups(self) -> None:
+        ids = self.comp_ids()
+        for grp in list(self.groups):
+            grp["members"] = [m for m in grp["members"] if m in ids]
+            if len(grp["members"]) < 2:
+                self.groups.remove(grp)
+
+    # ------------------------------------------------------------------ terrarium settings
+    async def async_save_compartment(self, comp_id: str, settings: dict) -> bool:
         enc, comp = self.find(comp_id)
         if comp is None:
             raise KeyError(comp_id)
-        merged = sanitize_compartment_settings(deep_update(comp, settings))
-        comp.update(merged)
+        old_labels = self._mark()
+        settings = dict(settings)
+        # parts that belong to a group go to the group
+        for kind in KINDS:
+            keys = ("lights", "light_auto") if kind == "light" else (kind,)
+            part = {k: settings.pop(k) for k in keys if k in settings}
+            if not part:
+                continue
+            grp = self.group_of(comp_id, kind)
+            if grp:
+                grp["config"] = sanitize_kind_config(kind, deep_update(grp["config"], part))
+            else:
+                settings.update(part)
+        comp.update(sanitize_compartment_settings(deep_update(comp, settings)))
+        return await self._after_change(old_labels)
+
+    async def async_set_auto(self, comp_id: str, kind: str, enabled: bool) -> None:
+        _enc, comp = self.find(comp_id)
+        if comp is None:
+            return
+        grp = self.group_of(comp_id, kind)
+        target = grp["config"] if grp else comp
+        if kind == "light":
+            target["light_auto"] = enabled
+        else:
+            target[kind]["enabled"] = enabled
         await self.async_save()
-        self._rename_entities({})  # device name follows the compartment name
-        self._resubscribe()
         self.evaluate_all()
-        return comp
 
     async def async_set_notify_enabled(self, comp_id: str, enabled: bool) -> None:
         _enc, comp = self.find(comp_id)
@@ -329,16 +308,117 @@ class TerrariumManager:
             return
         comp["notify"]["enabled"] = enabled
         await self.async_save()
-        async_dispatcher_send(self.hass, SIGNAL_UPDATE)
+        self.notify_update()
 
+    async def async_apply_template(self, comp_id: str, template_id: str) -> bool:
+        _enc, comp = self.find(comp_id)
+        tpl = next((t for t in self.templates if t["id"] == template_id), None)
+        if comp is None or tpl is None:
+            raise KeyError(template_id)
+        cfg = apply_template(tpl["kind"], self.effective(comp, tpl["kind"]), tpl)
+        return await self.async_save_compartment(comp_id, cfg)
+
+    # ------------------------------------------------------------------ groups / templates / light types
+    async def async_save_group(self, raw: dict) -> bool:
+        old_labels = self._mark()
+        existing = next((g for g in self.groups if g["id"] == raw.get("id")), None)
+        if existing and "config" not in raw:
+            raw = {**raw, "config": existing["config"]}
+        if not existing and not raw.get("config"):
+            # new group: start with the settings of the first member
+            _e, first = self.find((raw.get("members") or [""])[0])
+            if first is not None:
+                raw = {**raw, "config": copy.deepcopy(kind_config_of(raw.get("kind"), first))}
+        grp = sanitize_group(raw, self.comp_ids())
+        for other in self.groups:  # a terrarium is in at most one group per kind
+            if other["id"] != grp["id"] and other["kind"] == grp["kind"]:
+                other["members"] = [m for m in other["members"] if m not in grp["members"]]
+        if existing:
+            self.groups[self.groups.index(existing)] = grp
+        else:
+            self.groups.append(grp)
+        self._clean_groups()
+        return await self._after_change(old_labels)
+
+    async def async_delete_group(self, group_id: str) -> bool:
+        old_labels = self._mark()
+        grp = next((g for g in self.groups if g["id"] == group_id), None)
+        if grp:
+            # members keep a copy of the shared settings; the switch entities stay only with the first
+            # member, otherwise the same socket would be switched by several terrariums
+            for idx, m in enumerate(grp["members"]):
+                _e, comp = self.find(m)
+                if comp is None:
+                    continue
+                cfg = copy.deepcopy(grp["config"])
+                if idx:
+                    for light in cfg.get("lights", []):
+                        light["entity_id"] = ""
+                    if grp["kind"] in cfg:
+                        cfg[grp["kind"]]["entity_id"] = ""
+                comp.update(sanitize_compartment_settings(deep_update(comp, cfg)))
+            self.groups.remove(grp)
+        return await self._after_change(old_labels)
+
+    async def async_save_template(self, raw: dict) -> dict:
+        tpl = sanitize_template(raw)
+        if tpl["default_new"]:
+            for other in self.templates:
+                if other["kind"] == tpl["kind"] and other["id"] != tpl["id"]:
+                    other["default_new"] = False
+        idx = next((i for i, t in enumerate(self.templates) if t["id"] == tpl["id"]), None)
+        if idx is None:
+            self.templates.append(tpl)
+        else:
+            self.templates[idx] = tpl
+        await self.async_save()
+        self.notify_update()
+        return tpl
+
+    async def async_delete_template(self, template_id: str) -> None:
+        self.state["templates"] = [t for t in self.templates if t["id"] != template_id]
+        await self.async_save()
+        self.notify_update()
+
+    async def async_save_light_type(self, raw: dict) -> dict:
+        lt = sanitize_light_type(raw)
+        idx = next((i for i, t in enumerate(self.light_types) if t["id"] == lt["id"]), None)
+        if idx is None:
+            self.light_types.append(lt)
+        else:
+            self.light_types[idx] = lt
+        await self.async_save()
+        self.evaluate_all()
+        return lt
+
+    async def async_delete_light_type(self, type_id: str) -> None:
+        used = any(l.get("type_id") == type_id for u in self.units() if u["kind"] == "light" for l in u["cfg"]["lights"])
+        if used:
+            raise LayoutError("type_in_use", type_id)
+        self.state["light_types"] = [t for t in self.light_types if t["id"] != type_id]
+        await self.async_save()
+        self.notify_update()
+
+    # ------------------------------------------------------------------ rain by hand
+    def rain_now(self, comp_id: str, seconds: float | None = None) -> None:
+        unit = self.unit_of(comp_id, "rain")
+        if unit and unit["cfg"]["rain"].get("entity_id"):
+            self.auto.start_rain(unit, seconds or unit["cfg"]["rain"]["manual_duration"], self.auto.t("manual"))
+
+    def rain_stop(self, comp_id: str) -> None:
+        unit = self.unit_of(comp_id, "rain")
+        if unit:
+            self.auto.stop_rain(unit, self.auto.t("manual"))
+
+    # ------------------------------------------------------------------ entity names
     def _labels(self) -> dict[str, str]:
         return {c["id"]: label_of(e, c) for e in self.enclosures for c in e["compartments"]}
 
     def _rename_entities(self, old_labels: dict[str, str]) -> None:
-        """After renumbering: move entity ids that still follow the default pattern."""
+        """After renumbering: move entity ids that still follow the default pattern (two steps for swaps)."""
         reg = er.async_get(self.hass)
         new_labels = self._labels()
-        moves = []  # (temporary id, final id) – two steps, so swapped numbers work
+        moves = []
         for cid, old in old_labels.items():
             new = new_labels.get(cid)
             if not new or new == old:
@@ -348,37 +428,51 @@ class TerrariumManager:
                     ent_id = reg.async_get_entity_id(platform, DOMAIN, f"{cid}_{key}")
                     old_id = f"{platform}.terrarium_{old.replace('.', '_')}_{key}"
                     if not ent_id or ent_id != old_id:
-                        continue  # renamed by the user: leave it alone
+                        continue
                     tmp_id = f"{platform}.terrarium_renumber_{cid}_{key}"
                     reg.async_update_entity(ent_id, new_entity_id=tmp_id)
                     moves.append((tmp_id, f"{platform}.terrarium_{new.replace('.', '_')}_{key}"))
         for tmp_id, new_id in moves:
             target = new_id if reg.async_get(new_id) is None else new_id + "_2"
             reg.async_update_entity(tmp_id, new_entity_id=target)
-        # device names follow the new numbers
         dev_reg = dr.async_get(self.hass)
+        devices = dr.async_entries_for_config_entry(dev_reg, self.entry.entry_id)
         for enc in self.enclosures:
             for comp in enc["compartments"]:
-                dev = next((d for d in dr.async_entries_for_config_entry(dev_reg, self.entry.entry_id)
-                            if (DOMAIN, comp["id"]) in d.identifiers), None)
+                dev = next((d for d in devices if (DOMAIN, comp["id"]) in d.identifiers), None)
                 name = f"Terrarium {label_of(enc, comp)}" + (f" {comp['name']}" if comp["name"] else "")
                 if dev and dev.name != name:
                     dev_reg.async_update_device(dev.id, name=name)
 
     # ------------------------------------------------------------------ runtime
     async def async_start(self) -> None:
+        self._structure_before = self.structure()
         self._resubscribe()
-        self._unsub_timer = async_track_time_interval(self.hass, self._tick, timedelta(seconds=60))
+        self._unsub_timer = async_track_time_interval(self.hass, self._tick, timedelta(seconds=20))
+        self._unsub_slow = async_track_time_interval(self.hass, self._slow, timedelta(minutes=1))
         self.evaluate_all()
 
     @callback
     def async_unload(self) -> None:
-        if self._unsub_states:
-            self._unsub_states()
-            self._unsub_states = None
-        if self._unsub_timer:
-            self._unsub_timer()
-            self._unsub_timer = None
+        for name in ("_unsub_states", "_unsub_timer", "_unsub_slow"):
+            unsub = getattr(self, name)
+            if unsub:
+                unsub()
+                setattr(self, name, None)
+        for rt in self.auto.rt.values():
+            if rt.get("cancel"):
+                rt["cancel"]()
+                rt["cancel"] = None  # "until" stays, the next instance arms the timer again
+        self.hass.async_create_task(self.persist.async_close())
+
+    @callback
+    def _tick(self, _now: datetime) -> None:
+        self.evaluate_all()
+
+    async def _slow(self, now: datetime) -> None:
+        await self.persist.async_retry(self.state)
+        if now.minute == 7 and now.hour == 3:
+            await self.persist.async_prune()
 
     @callback
     def _resubscribe(self) -> None:
@@ -391,15 +485,18 @@ class TerrariumManager:
                 watched.update(comp["climate"]["temp_sensors"])
                 watched.update(comp["climate"]["hum_sensors"])
                 watched.update(d["entity_id"] for d in comp["devices"])
+        for unit in self.units():
+            cfg = unit["cfg"]
+            if unit["kind"] == "light":
+                watched.update(l["entity_id"] for l in cfg["lights"] if l["entity_id"])
+            elif cfg[unit["kind"]].get("entity_id"):
+                watched.add(cfg[unit["kind"]]["entity_id"])
         if watched:
             self._unsub_states = async_track_state_change_event(self.hass, list(watched), self._state_changed)
 
     @callback
-    def _tick(self, _now: datetime) -> None:
-        self.evaluate_all()
-
-    @callback
-    def _state_changed(self, _event: Event) -> None:
+    def _state_changed(self, event: Event) -> None:
+        self.auto.on_state(event)
         self.evaluate_all()
 
     def _read(self, entity_ids: list[str]) -> tuple[float | None, list[dict]]:
@@ -408,7 +505,7 @@ class TerrariumManager:
             st = self.hass.states.get(ent)
             val = None
             if st is not None and st.state not in (STATE_UNAVAILABLE, STATE_UNKNOWN):
-                val = _num(st.state)
+                val = num(st.state)
             details.append({"entity_id": ent, "value": val,
                             "name": st.attributes.get("friendly_name", ent) if st else ent})
             if val is not None:
@@ -421,7 +518,7 @@ class TerrariumManager:
         night = clim["night"]
         if not night["enabled"]:
             return "day"
-        start, end = _parse_time(night["start"]), _parse_time(night["end"])
+        start, end = parse_time(night["start"]), parse_time(night["end"])
         if start is None or end is None or start == end:
             return "day"
         cur = dt_util.as_local(now).time()
@@ -443,6 +540,7 @@ class TerrariumManager:
         for enc in self.enclosures:
             for comp in enc["compartments"]:
                 self._evaluate(enc, comp, now)
+        self.auto.tick()
         async_dispatcher_send(self.hass, SIGNAL_UPDATE)
 
     def _evaluate(self, enc: dict, comp: dict, now: datetime) -> None:
@@ -613,6 +711,7 @@ class TerrariumManager:
         return out
 
     def snapshot(self) -> dict:
+        labels = self._labels()
         encs = []
         for enc in self.enclosures:
             e = copy.deepcopy(enc)
@@ -620,5 +719,17 @@ class TerrariumManager:
                 comp["label"] = label_of(enc, comp)
                 comp["live"] = self.live.get(comp["id"], {})
                 comp["entities"] = self.entity_ids(comp["id"])
+                comp["groups"] = {}
+                comp["auto"] = {}
+                for kind in KINDS:
+                    grp = self.group_of(comp["id"], kind)
+                    if grp:
+                        comp["groups"][kind] = {"id": grp["id"], "name": grp["name"],
+                                                "members": [labels.get(m, "?") for m in grp["members"]]}
+                        comp.update(copy.deepcopy(grp["config"]))  # effective settings
+                    uid = f"g_{grp['id']}_{kind}" if grp else f"c_{comp['id']}_{kind}"
+                    comp["auto"][kind] = self.auto.info.get(uid, {})
             encs.append(e)
-        return {"enclosures": encs}
+        groups = [{**g, "member_labels": [labels.get(m, "?") for m in g["members"]]} for g in self.groups]
+        return {"enclosures": encs, "groups": groups, "templates": self.templates, "light_types": self.light_types,
+                "db": self.persist.db_info}

@@ -4,7 +4,8 @@
 
 Manage terrariums for keeping animals in Home Assistant: build **enclosures** (racks, cabinets) that are split into
 several **terrariums** of any size and position, watch **temperature and humidity** against limits and get
-**push notifications** when something is out of range.
+**push notifications** when something is out of range – and automate **light, rain and ventilation** per terrarium
+or for several terrariums together. All settings are stored in **MariaDB** (add-on or external server).
 
 The integration brings its own **sidebar panel** (and a Lovelace card) with an overview of all terrariums, a drawn
 **model** of every enclosure, a detail view per terrarium and all settings – no YAML needed.
@@ -31,6 +32,50 @@ The integration brings its own **sidebar panel** (and a Lovelace card) with an o
   (plants, stones, branches, mixed) and back wall (rock, cork, plain, jungle).
 - German and English.
 
+## Light, rain, ventilation
+
+All of it is set in the settings of each terrarium (tabs *Light*, *Rain*, *Ventilation*):
+
+- **Several lights per terrarium**, each with a **light source** from the catalogue (LED, HID 35/70/100/150 W,
+  P&L, Power & Heat, Power & Heat LED, night LED – and your own), its socket (e.g. a Tasmota plug) and any number of
+  **light profiles**: time windows (fixed time or **sunrise/sunset ± minutes**, over midnight possible), weekdays and
+  an optional **season** (e.g. summer 04-01 – 09-30, winter 10-01 – 03-31). Night LEDs (moonlight) work the same way.
+- **HID restrike lock** per light source (default 10 min): after switching off, the lamp is not switched on again
+  before it has cooled down – also after a reload.
+- Optional **overheat protection** per light: off above a temperature, on again below it minus hysteresis.
+- **Rain**: several runs per day with their own duration (seconds), profiles with weekdays/season, safety maximum
+  duration, minimum pause, *rain now* (button entity, card). Depending on humidity – each rule on/off on its own:
+  - **rain when the humidity falls below** a value (duration, minimum pause),
+  - **do not rain when the humidity is above** a value (scheduled runs are skipped and logged).
+  After a restart the pump is never left running.
+- **Ventilation**: continuous windows and/or interval runs, **on above a temperature** and/or **above a humidity**
+  (with hysteresis and minimum run time).
+- **Automation on/off** per terrarium (switch entities, also in the card); switching by hand holds until the next
+  scheduled change.
+- **Groups**: terrariums that share a light, rain or ventilation system (e.g. 2.1, 2.2, 2.3 with one rain pump) are
+  switched as one – settings are edited in any member, humidity/temperature is the average of the members.
+- **Templates** for light, rain and ventilation, one per kind as *default for new terrariums*; apply a template in
+  any terrarium or save a terrarium's settings as a template.
+- **Switching log** (what was switched when and why) in the detail view and in the database.
+
+<p>
+  <img src="docs/images/light-settings.png" width="49%" alt="Light settings">
+  <img src="docs/images/rain-settings.png" width="49%" alt="Rain settings">
+</p>
+
+## Database (MariaDB)
+
+Without a database everything is stored locally (`.storage/terrarium`). With MariaDB all enclosures, terrariums,
+lights, profiles, groups, templates, light sources and the switching log are stored in tables `tr_*`
+(JSON documents with readable key columns); the local copy stays as fallback when the database is not reachable,
+and changes made meanwhile are written as soon as it is back.
+
+1. Create database and user – [`docs/setup-db.sql`](docs/setup-db.sql) (replace the password, run as root).
+2. *Settings → Devices & services → Terrarium → Configure → MariaDB database*:
+   - external server: `mysql://terrarium:PASSWORD@HOST/terrarium?charset=utf8mb4`
+   - MariaDB add-on: `mysql://terrarium:PASSWORD@core-mariadb/terrarium?charset=utf8mb4`
+3. The connection is tested when saving; existing local data is copied into the database.
+
 ![Detail view](docs/images/details.png)
 
 ![Layout editor](docs/images/editor.png)
@@ -53,11 +98,6 @@ The view adapts to the width of the panel or card (container queries), so it wor
   <img src="docs/images/phone-details.png" width="260" alt="Phone detail view">
 </p>
 
-## Planned
-
-Light control (times, sunrise/sunset), ventilation control and rain simulation – the settings page already
-has the places reserved for them.
-
 ## Installation
 
 ### HACS
@@ -77,7 +117,8 @@ The card script is loaded automatically – no dashboard resource needed.
 - Open **Terrarien / Terrariums** in the sidebar (title, icon and admin-only can be changed under
   *Configure* of the integration).
 - **New enclosure** → overall size → split it (grid or *Add terrarium*) → *Save*.
-- Tap a terrarium → detail view → **Settings** (sensors, limits, notifications, devices, look).
+- Tap a terrarium → detail view → **Settings** (sensors, limits, notifications, light, rain, ventilation, devices, look).
+- Admin buttons in the overview: **Light sources**, **Templates**, **Groups**.
 
 Editing needs an administrator; everybody can look and switch devices.
 
@@ -103,6 +144,10 @@ Per terrarium (`1_2` = terrarium 1.2):
 | `sensor.terrarium_1_2_status` | `ok`, `pending` (out of range, delay running), `alarm`, `offline`, `not_configured` |
 | `binary_sensor.terrarium_1_2_problem` | on while an alarm is active |
 | `switch.terrarium_1_2_cfg_notify` | notifications on/off |
+| `switch.terrarium_1_2_cfg_light_auto` | light automation on/off (when lights are set) |
+| `switch.terrarium_1_2_cfg_rain_auto` | rain automation on/off (when a rain socket is set) |
+| `switch.terrarium_1_2_cfg_vent_auto` | ventilation automation on/off (when a fan socket is set) |
+| `button.terrarium_1_2_rain_now` | rain now with the set duration |
 
 Per enclosure: `sensor.terrarium_1_problems` – number of terrariums with an alarm.
 
@@ -120,8 +165,9 @@ limit: 25
 ## WebSocket API
 
 `terrarium/get`, `terrarium/subscribe`, `terrarium/save_enclosure`, `terrarium/delete_enclosure`,
-`terrarium/save_compartment`, `terrarium/test_notify`, `terrarium/notify_targets`.
-Data is stored in `.storage/terrarium`.
+`terrarium/save_compartment`, `terrarium/test_notify`, `terrarium/notify_targets`, `terrarium/save_group`,
+`terrarium/delete_group`, `terrarium/save_template`, `terrarium/delete_template`, `terrarium/apply_template`,
+`terrarium/save_light_type`, `terrarium/delete_light_type`, `terrarium/rain` (start/stop), `terrarium/events`.
 
 ## License
 

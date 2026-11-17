@@ -7,34 +7,54 @@
     "step": {
       "user": {
         "title": "Terrarium",
-        "description": "Anlagen, Terrarien, Sensoren und Grenzwerte werden im Terrarien-Panel in der Seitenleiste (oder in der Terrarien-Karte) verwaltet.",
+        "description": "Anlagen, Terrarien, Licht, Bewässerung, Lüftung, Gruppen und Vorlagen werden im Terrarien-Panel verwaltet. Alle Einstellungen werden in der MariaDB gespeichert (lokale Kopie als Ausfallsicherung).",
         "data": {
           "panel_show": "Panel in der Seitenleiste anzeigen",
           "panel_title": "Titel in der Seitenleiste",
           "panel_icon": "Symbol in der Seitenleiste",
-          "panel_admin": "Panel nur für Administratoren"
+          "panel_admin": "Panel nur für Administratoren",
+          "db_url": "MariaDB-Datenbank (optional)"
+        },
+        "data_description": {
+          "db_url": "Leer = nur lokal speichern. Externer Server: mysql://BENUTZER:PASSWORT@HOST/terrarium?charset=utf8mb4 – MariaDB-Add-on: mysql://BENUTZER:PASSWORT@core-mariadb/terrarium?charset=utf8mb4"
         }
       }
+    },
+    "error": {
+      "db_url_invalid": "Ungültige Adresse – sie muss mit mysql:// beginnen.",
+      "db_connect": "Keine Verbindung zur Datenbank (Adresse, Benutzer, Passwort, Rechte prüfen)."
     }
   },
   "options": {
     "step": {
       "init": {
         "title": "Terrarium",
-        "description": "Anlagen, Terrarien, Sensoren und Grenzwerte werden im Terrarien-Panel verwaltet.",
+        "description": "Anlagen, Terrarien, Licht, Bewässerung, Lüftung, Gruppen und Vorlagen werden im Terrarien-Panel verwaltet. Alle Einstellungen werden in der MariaDB gespeichert (lokale Kopie als Ausfallsicherung).",
         "data": {
           "panel_show": "Panel in der Seitenleiste anzeigen",
           "panel_title": "Titel in der Seitenleiste",
           "panel_icon": "Symbol in der Seitenleiste",
-          "panel_admin": "Panel nur für Administratoren"
+          "panel_admin": "Panel nur für Administratoren",
+          "db_url": "MariaDB-Datenbank (optional)"
+        },
+        "data_description": {
+          "db_url": "Leer = nur lokal speichern. Externer Server: mysql://BENUTZER:PASSWORT@HOST/terrarium?charset=utf8mb4 – MariaDB-Add-on: mysql://BENUTZER:PASSWORT@core-mariadb/terrarium?charset=utf8mb4"
         }
       }
+    },
+    "error": {
+      "db_url_invalid": "Ungültige Adresse – sie muss mit mysql:// beginnen.",
+      "db_connect": "Keine Verbindung zur Datenbank (Adresse, Benutzer, Passwort, Rechte prüfen)."
     }
   },
   "entity": {
     "sensor": {
-      "temperature": {"name": "Temperatur"},
-      "humidity": {"name": "Luftfeuchtigkeit"},
+      "temperature": {
+        "name": "Temperatur"
+      },
+      "humidity": {
+        "name": "Luftfeuchtigkeit"
+      },
       "status": {
         "name": "Status",
         "state": {
@@ -45,13 +65,33 @@
           "not_configured": "Nicht eingerichtet"
         }
       },
-      "problems": {"name": "Probleme"}
+      "problems": {
+        "name": "Probleme"
+      }
     },
     "binary_sensor": {
-      "problem": {"name": "Problem"}
+      "problem": {
+        "name": "Problem"
+      }
     },
     "switch": {
-      "cfg_notify": {"name": "Benachrichtigungen"}
+      "cfg_notify": {
+        "name": "Benachrichtigungen"
+      },
+      "cfg_light_auto": {
+        "name": "Lichtautomatik"
+      },
+      "cfg_rain_auto": {
+        "name": "Bewässerungsautomatik"
+      },
+      "cfg_vent_auto": {
+        "name": "Lüftungsautomatik"
+      }
+    },
+    "button": {
+      "rain_now": {
+        "name": "Jetzt beregnen"
+      }
     }
   }
 }

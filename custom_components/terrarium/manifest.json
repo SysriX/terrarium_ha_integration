@@ -1,7 +1,7 @@
 {
   "domain": "terrarium",
   "name": "Terrarium",
-  "after_dependencies": ["notify", "recorder"],
+  "after_dependencies": ["notify", "recorder", "sun"],
   "codeowners": ["@SysriX"],
   "config_flow": true,
   "dependencies": ["http", "frontend", "panel_custom", "websocket_api"],
@@ -11,5 +11,5 @@
   "issue_tracker": "https://github.com/SysriX/terrarium_ha_integration/issues",
   "requirements": [],
   "single_config_entry": true,
-  "version": "1.1.0"
+  "version": "1.2.0"
 }

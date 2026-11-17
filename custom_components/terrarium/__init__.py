@@ -14,7 +14,7 @@ from homeassistant.helpers import entity_registry as er
 from homeassistant.helpers.typing import ConfigType
 
 from .const import (
-    CARD_FILE, CONF_PANEL_ADMIN, CONF_PANEL_ICON, CONF_PANEL_SHOW, CONF_PANEL_TITLE, DEFAULT_PANEL_ICON,
+    CARD_FILE, CONF_DB_URL, CONF_PANEL_ADMIN, CONF_PANEL_ICON, CONF_PANEL_SHOW, CONF_PANEL_TITLE, DEFAULT_PANEL_ICON,
     DEFAULT_PANEL_TITLE, DOMAIN, PANEL_ELEMENT, PANEL_URL, PLATFORMS, STATIC_URL, VERSION,
 )
 from .manager import TerrariumManager, label_of
@@ -45,7 +45,7 @@ def _opt(entry: ConfigEntry, key: str, default):
 
 
 async def async_setup_entry(hass: HomeAssistant, entry: TerrariumConfigEntry) -> bool:
-    mgr = TerrariumManager(hass, entry)
+    mgr = TerrariumManager(hass, entry, _opt(entry, CONF_DB_URL, ""))
     await mgr.async_load()
     entry.runtime_data = mgr
     hass.data.setdefault(DOMAIN, {})["manager"] = mgr
@@ -53,6 +53,7 @@ async def async_setup_entry(hass: HomeAssistant, entry: TerrariumConfigEntry) ->
     _sync_devices(hass, entry, mgr)
 
     await hass.config_entries.async_forward_entry_setups(entry, PLATFORMS)
+    _remove_stale_entities(hass, entry, mgr)
     await mgr.async_start()
     entry.async_on_unload(mgr.async_unload)
 
@@ -118,6 +119,22 @@ def _sync_devices(hass: HomeAssistant, entry: ConfigEntry, mgr: TerrariumManager
             for ent in er.async_entries_for_device(ent_reg, device.id, include_disabled_entities=True):
                 ent_reg.async_remove(ent.entity_id)
             dev_reg.async_remove_device(device.id)
+
+
+def _remove_stale_entities(hass: HomeAssistant, entry: ConfigEntry, mgr: TerrariumManager) -> None:
+    """Remove entities of features that are no longer configured (e.g. ventilation socket removed)."""
+    keep = {f"enc_{e['id']}_problems" for e in mgr.enclosures}
+    for enc in mgr.enclosures:
+        for comp in enc["compartments"]:
+            keep.update(f"{comp['id']}_{k}" for k in ("temperature", "humidity", "status", "problem", "cfg_notify"))
+            feats = mgr.features(comp)
+            keep.update(f"{comp['id']}_cfg_{kind}_auto" for kind, on in feats.items() if on)
+            if feats["rain"]:
+                keep.add(f"{comp['id']}_rain_now")
+    ent_reg = er.async_get(hass)
+    for ent in er.async_entries_for_config_entry(ent_reg, entry.entry_id):
+        if ent.unique_id not in keep:
+            ent_reg.async_remove(ent.entity_id)
 
 
 async def async_unload_entry(hass: HomeAssistant, entry: TerrariumConfigEntry) -> bool:

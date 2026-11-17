@@ -85,6 +85,58 @@ for (const e of data.enclosures) for (const c of e.compartments) { c.label = `${
 data.enclosures[0].compartments[1].live.temp_sensors = [{ entity_id: "sensor.gecko_warm_temperature", name: "Gecko warm side", value: 30.8 }, { entity_id: "sensor.gecko_cold_temperature", name: "Gecko cold side", value: 25.2 }];
 data.enclosures[0].compartments[1].live.hum_sensors = [{ entity_id: "sensor.gecko_humidity", name: "Gecko humidity", value: 41 }];
 
+// ---- automation demo data (1.2)
+st("switch.gecko_hid", "on", { friendly_name: "Gecko HID 70 W" });
+st("switch.gecko_moon", "off", { friendly_name: "Gecko moon LED" });
+st("switch.rack_rain", "off", { friendly_name: "Rack rain pump" });
+st("switch.dragon_hid", "on", { friendly_name: "Dragon HID 150 W" });
+data.light_types = [
+  { id: "led", name: "LED Ausleuchtung", category: "led", watt: 20, restrike_min: 0, color: "#fff6e0" },
+  { id: "hid70", name: "HID 70 W", category: "hid", watt: 70, restrike_min: 10, color: "#ffe9b0" },
+  { id: "hid150", name: "HID 150 W", category: "hid", watt: 150, restrike_min: 10, color: "#ffe9b0" },
+  { id: "pl", name: "P&L Leuchte (Pflanzen)", category: "pl", watt: 30, restrike_min: 0, color: "#f3e8ff" },
+  { id: "ph_led", name: "Power & Heat LED", category: "ph", watt: 25, restrike_min: 0, color: "#ffd99a" },
+  { id: "night", name: "Nacht-LED (Mondlicht)", category: "night", watt: 2, restrike_min: 0, color: "#7fa8ff" },
+];
+const TT = (s) => ({ type: "time", time: s, offset: 0 });
+const prof = (name, on, off, extra = {}) => ({ id: name, name, enabled: true, days: [], season: { enabled: false, from: "03-01", to: "10-31" }, windows: [{ on: TT(on), off: TT(off) }], runs: [], ...extra });
+const today = (h, m = 0) => { const d = new Date(); d.setHours(h, m, 0, 0); return d.toISOString(); };
+const lightsGecko = [
+  { id: "l1", name: "", type_id: "led", entity_id: "light.gecko_led", enabled: true, overheat: { enabled: false, above: 40, hyst: 2 }, profiles: [prof("Summer", "08:00", "20:00", { season: { enabled: true, from: "04-01", to: "09-30" } }), prof("Winter", "09:00", "18:00", { season: { enabled: true, from: "10-01", to: "03-31" } })] },
+  { id: "l2", name: "Basking spot", type_id: "hid70", entity_id: "switch.gecko_hid", enabled: true, overheat: { enabled: true, above: 38, hyst: 2 }, profiles: [prof("Day", "10:00", "16:00")] },
+  { id: "l3", name: "", type_id: "night", entity_id: "switch.gecko_moon", enabled: true, overheat: { enabled: false, above: 40, hyst: 2 }, profiles: [prof("Moon", "20:00", "23:00", { days: [4, 5] })] },
+];
+const rainShared = { entity_id: "switch.rack_rain", enabled: true, manual_duration: 30, max_duration: 600, min_pause: 0,
+  profiles: [{ id: "r1", name: "Daily", enabled: true, days: [], season: { enabled: false, from: "03-01", to: "10-31" }, windows: [], runs: [{ at: TT("08:00"), duration: 45 }, { at: TT("14:00"), duration: 30 }, { at: TT("19:30"), duration: 30 }] }],
+  hum_start: { enabled: true, below: 60, duration: 30, min_pause: 120 }, hum_block: { enabled: true, above: 92 } };
+const vent = { entity_id: "fan.frogs_fan", enabled: true, min_run: 5, profiles: [{ id: "v1", name: "Fresh air", enabled: true, days: [], season: { enabled: false, from: "03-01", to: "10-31" }, windows: [], runs: [{ at: TT("12:00"), duration: 600 }] }],
+  temp_on: { enabled: true, above: 28, hyst: 1 }, hum_on: { enabled: true, above: 95, hyst: 5 } };
+for (const e of data.enclosures) for (const c of e.compartments) {
+  c.lights = []; c.light_auto = true; c.rain = { entity_id: "", enabled: true, profiles: [], manual_duration: 30, max_duration: 600, min_pause: 0, hum_start: { enabled: false, below: 60, duration: 30, min_pause: 60 }, hum_block: { enabled: false, above: 90 } };
+  c.vent = { entity_id: "", enabled: true, profiles: [], min_run: 5, temp_on: { enabled: false, above: 32, hyst: 1 }, hum_on: { enabled: false, above: 90, hyst: 5 } };
+  c.groups = {}; c.auto = {}; c.entities.cfg_light_auto = "switch.terrarium_x_cfg_light_auto";
+}
+const C = (id) => data.enclosures.flatMap((e) => e.compartments).find((c) => c.id === id);
+const g = C("c2"); g.lights = lightsGecko;
+g.auto.light = { auto: true, lights: [
+  { id: "l1", name: "LED Ausleuchtung", category: "led", color: "#fff6e0", entity_id: "light.gecko_led", state: "on", auto: true, next: today(18), reason: "Schedule" },
+  { id: "l2", name: "Basking spot", category: "hid", color: "#ffe9b0", entity_id: "switch.gecko_hid", state: "on", auto: true, next: today(16), reason: "Schedule" },
+  { id: "l3", name: "Nacht-LED (Mondlicht)", category: "night", color: "#7fa8ff", entity_id: "switch.gecko_moon", state: "off", auto: true, next: today(20) },
+] };
+for (const id of ["c2", "c3"]) { const c = C(id); c.rain = clone2(rainShared); c.groups.rain = { id: "g1", name: "Middle row", members: ["1.2", "1.3"] };
+  c.auto.rain = { configured: true, auto: true, entity_id: "switch.rack_rain", state: "off", running_until: null, next_run: today(19, 30), next_duration: 30, last_run: today(14), blocked: false, manual_duration: 30 }; }
+const f = C("c4"); f.vent = vent; f.auto.vent = { configured: true, auto: true, entity_id: "fan.frogs_fan", state: "off", desired: false, reason: "off", next: today(23, 59) };
+f.lights = [{ id: "l9", name: "", type_id: "pl", entity_id: "light.frogs_led", enabled: true, overheat: { enabled: false, above: 40, hyst: 2 }, profiles: [prof("Rainforest", "07:30", "19:30")] }];
+f.auto.light = { auto: true, lights: [{ id: "l9", name: "P&L Leuchte (Pflanzen)", category: "pl", color: "#f3e8ff", entity_id: "light.frogs_led", state: "on", auto: true, next: today(19, 30) }] };
+const dgn = C("c5"); dgn.lights = [{ id: "l7", name: "", type_id: "hid150", entity_id: "switch.dragon_hid", enabled: true, overheat: { enabled: true, above: 42, hyst: 2 }, profiles: [prof("Day", "08:00", "19:00")] }];
+dgn.auto.light = { auto: true, lights: [{ id: "l7", name: "HID 150 W", category: "hid", color: "#ffe9b0", entity_id: "switch.dragon_hid", state: "on", auto: true, next: today(19), reason: "Schedule" }] };
+data.groups = [{ id: "g1", kind: "rain", name: "Middle row", members: ["c2", "c3"], member_labels: ["1.2", "1.3"], config: { rain: rainShared } }];
+data.templates = [
+  { id: "t1", kind: "light", name: "Desert (LED + HID)", default_new: true, config: { light_auto: true, lights: [lightsGecko[0], lightsGecko[1]].map((l) => ({ ...l, entity_id: "" })) } },
+  { id: "t2", kind: "rain", name: "Rainforest 3× daily", default_new: false, config: { rain: { ...rainShared, entity_id: "" } } },
+];
+data.db = { status: "ok", error: "", url: "mysql://terrarium:***@192.0.2.10/terrarium" };
+function clone2(o) { return JSON.parse(JSON.stringify(o)); }
 let subCb = null;
 const hist = (base, amp, noise) => { const out = []; const now = Date.now() / 1000; for (let i = 0; i <= 288; i++) { const t = now - 86400 + i * 300; const hr = new Date(t * 1000).getHours() + new Date(t * 1000).getMinutes() / 60; out.push({ s: (base + amp * Math.sin((hr - 9) / 24 * 2 * Math.PI) + (Math.random() - 0.5) * noise).toFixed(2), lu: t }); } return out; };
 const hass = {
@@ -97,6 +149,13 @@ const hass = {
     if (m.type === "terrarium/save_enclosure") { console.log("save_enclosure", m.enclosure); return { id: "x", reload: true }; }
     if (m.type === "terrarium/save_compartment") { console.log("save_compartment", m); return null; }
     if (m.type === "terrarium/test_notify") return { failed: [] };
+    if (m.type === "terrarium/events") return { events: [
+      { ts: new Date(Date.now() - 20 * 60000).toISOString(), unit: "Middle row", kind: "rain", entity_id: "switch.rack_rain", action: "off", reason: "Run finished" },
+      { ts: new Date(Date.now() - 21 * 60000).toISOString(), unit: "Middle row", kind: "rain", entity_id: "switch.rack_rain", action: "on", reason: "Schedule Daily (30 s)" },
+      { ts: new Date(Date.now() - 95 * 60000).toISOString(), unit: "1.2", kind: "light", entity_id: "switch.gecko_hid", action: "on", reason: "Schedule" },
+      { ts: new Date(Date.now() - 300 * 60000).toISOString(), unit: "1.2", kind: "light", entity_id: "light.gecko_led", action: "on", reason: "Schedule" } ] };
+    if (m.type === "terrarium/rain") { console.log("rain", m); return {}; }
+    if (m.type && m.type.startsWith("terrarium/")) { console.log(m.type, m); return { id: "x" }; }
     return null;
   },
 };
@@ -109,7 +168,9 @@ document.getElementById("host").appendChild(el);
 const view = P.get("view");
 setTimeout(() => {
   if (view === "details") { el._view = { name: "details", comp: P.get("comp") || "c4" }; el._render(); }
-  if (view === "settings") el._openCompSettings(P.get("comp") || "c2");
+  if (view === "settings") el._openCompSettings(P.get("comp") || "c2", P.get("tab") || "general");
+  if (view === "ltypes" || view === "tpls" || view === "groups") { el._view = { name: view }; el._render(); }
+  if (view === "tpl") { el._view = { name: "tpl", draft: JSON.parse(JSON.stringify(data.templates[0])) }; el._render(); }
   if (view === "editor") { el._openEncEditor("e1"); el._view.sel = "c3"; el._render(); }
 }, 60);
 </script>
